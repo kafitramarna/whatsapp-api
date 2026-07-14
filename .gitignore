@@ -36,3 +36,5 @@ coverage/
 # Misc
 *.tmp
 *.temp
+
+phase/
