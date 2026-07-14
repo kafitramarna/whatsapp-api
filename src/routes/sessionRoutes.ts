@@ -13,6 +13,8 @@ import {
   deleteSessionHandler,
   listSessionsHandler,
   sendMessageHandler,
+  markReadHandler,
+  sendPresenceHandler,
 } from '../controllers/sessionController';
 import {
   sendToGroupHandler,
@@ -77,6 +79,8 @@ export async function sessionRoutes(
 
   // Send message (text and/or media) to individual
   fastify.post('/session/:sessionId/send', { schema: MessagingSchemas.send }, sendMessageHandler);
+  fastify.post('/session/:sessionId/read', { schema: MessagingSchemas.read }, markReadHandler);
+  fastify.post('/session/:sessionId/presence', { schema: MessagingSchemas.presence }, sendPresenceHandler);
 
   // Send message to group
   fastify.post('/session/:sessionId/send-group', { schema: MessagingSchemas.sendGroup }, sendToGroupHandler);

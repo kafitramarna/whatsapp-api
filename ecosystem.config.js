@@ -27,11 +27,13 @@ module.exports = {
       // Environment variables
       env: {
         NODE_ENV: 'development',
-        PORT: 3000,
+        PORT: 3002,
+        HOST: '127.0.0.1',
       },
       env_production: {
         NODE_ENV: 'production',
-        PORT: 3000,
+        PORT: 3002,
+        HOST: '127.0.0.1',
       },
       
       // Logging

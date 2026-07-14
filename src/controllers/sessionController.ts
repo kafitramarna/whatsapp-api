@@ -11,6 +11,8 @@ import {
   deleteSession,
   getSessionStatus,
   getSession,
+  markMessageRead,
+  sendPresence,
   sessions,
   qrCodes,
 } from '../services/whatsappService';
@@ -36,6 +38,16 @@ interface SendMessageBody {
     filename?: string;
     mimetype?: string;
   }>;
+}
+
+interface MarkReadBody {
+  remoteJid: string;
+  messageId: string;
+}
+
+interface PresenceBody {
+  remoteJid: string;
+  presence: 'composing' | 'paused';
 }
 
 /**
@@ -471,6 +483,73 @@ export async function sendMessageHandler(
   }
 }
 
+export async function markReadHandler(
+  request: FastifyRequest<{ Params: SessionParams; Body: MarkReadBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId } = request.params;
+    const { remoteJid, messageId } = request.body;
+    const user = request.user!;
+
+    if (!remoteJid || !messageId) {
+      reply.status(400).send({ success: false, error: 'Missing remoteJid or messageId' });
+      return;
+    }
+
+    const session = await Session.findOne({ where: { session_id: sessionId, user_id: user.id } });
+    if (!session) {
+      reply.status(404).send({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    await markMessageRead(sessionId, remoteJid, messageId);
+    reply.send({ success: true, message: 'Message marked as read' });
+  } catch (error) {
+    console.error('[Controller] Mark read error:', error);
+    reply.status(500).send({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+}
+
+export async function sendPresenceHandler(
+  request: FastifyRequest<{ Params: SessionParams; Body: PresenceBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId } = request.params;
+    const { remoteJid, presence } = request.body;
+    const user = request.user!;
+
+    if (!remoteJid || !presence) {
+      reply.status(400).send({ success: false, error: 'Missing remoteJid or presence' });
+      return;
+    }
+
+    if (presence !== 'composing' && presence !== 'paused') {
+      reply.status(400).send({ success: false, error: 'Invalid presence' });
+      return;
+    }
+
+    const session = await Session.findOne({ where: { session_id: sessionId, user_id: user.id } });
+    if (!session) {
+      reply.status(404).send({ success: false, error: 'Session not found' });
+      return;
+    }
+
+    await sendPresence(sessionId, remoteJid, presence);
+    reply.send({ success: true, message: 'Presence updated' });
+  } catch (error) {
+    console.error('[Controller] Presence error:', error);
+    reply.status(500).send({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+}
+
 export default {
   createSessionHandler,
   getSessionStatusHandler,
@@ -478,4 +557,6 @@ export default {
   deleteSessionHandler,
   listSessionsHandler,
   sendMessageHandler,
+  markReadHandler,
+  sendPresenceHandler,
 };

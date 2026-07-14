@@ -11,6 +11,8 @@ import makeWASocket, {
   ConnectionState,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
+  jidDecode,
+  jidNormalizedUser,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import { useSequelizeAuthState } from '../lib/whatsappAuth';
@@ -19,6 +21,7 @@ import { AuthKey } from '../models/AuthKey';
 import { env } from '../config/env';
 import QRCode from 'qrcode';
 import pino from 'pino';
+import { sessionStore } from './sessionStore'
 
 // Logger for Baileys (set to silent in production)
 const logger = pino({ level: env.isDev ? 'debug' : 'silent' });
@@ -95,6 +98,50 @@ export function getSession(sessionId: string): WASocket | undefined {
   return sessions.get(sessionId);
 }
 
+function normalizeRemoteJid(remoteJid: string) {
+  const trimmed = remoteJid.trim();
+  if (!trimmed) {
+    throw new Error('Invalid remoteJid');
+  }
+
+  const normalized = trimmed.includes('@')
+    ? jidNormalizedUser(trimmed)
+    : `${trimmed.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
+
+  const decoded = jidDecode(normalized);
+  if (!decoded?.user || !decoded.server) {
+    throw new Error(`Invalid remoteJid: ${remoteJid}`);
+  }
+
+  return normalized;
+}
+
+export async function markMessageRead(sessionId: string, remoteJid: string, messageId: string): Promise<void> {
+  const socket = sessions.get(sessionId);
+  if (!socket?.user) {
+    throw new Error('Session not connected');
+  }
+
+  const normalizedRemoteJid = normalizeRemoteJid(remoteJid);
+
+  await socket.readMessages([
+    {
+      remoteJid: normalizedRemoteJid,
+      id: messageId,
+      fromMe: false,
+    },
+  ]);
+}
+
+export async function sendPresence(sessionId: string, remoteJid: string, presence: 'composing' | 'paused'): Promise<void> {
+  const socket = sessions.get(sessionId);
+  if (!socket?.user) {
+    throw new Error('Session not connected');
+  }
+
+  await socket.sendPresenceUpdate(presence, normalizeRemoteJid(remoteJid));
+}
+
 /**
  * Create a new WhatsApp session
  */
@@ -138,6 +185,10 @@ export async function createSession(
         status: SessionStatus.CONNECTING,
         webhook_url: webhookUrl,
       },
+    });
+
+    sessionStore.set(sessionId, {
+      webhookUrl: session.webhook_url
     });
 
     // If session existed but we are restarting it, update webhook if provided
@@ -203,9 +254,12 @@ export async function createSession(
                      msg.message?.stickerMessage),
       }));
 
+
+      const runtime = sessionStore.get(sessionId)
+
       // Send webhook if configured
-      if (session.webhook_url) {
-        await sendWebhook(session.webhook_url, {
+      if (runtime?.webhookUrl) {
+        await sendWebhook(runtime?.webhookUrl, {
           event: 'message.received',
           sessionId,
           timestamp: new Date().toISOString(),
@@ -227,9 +281,11 @@ export async function createSession(
         statusCode: update.update?.status ?? undefined,
       }));
 
+      const runtime = sessionStore.get(sessionId);
+
       // Send webhook if configured
-      if (session.webhook_url) {
-        await sendWebhook(session.webhook_url, {
+      if (runtime?.webhookUrl) {
+        await sendWebhook(runtime?.webhookUrl, {
           event: 'message.status',
           sessionId,
           timestamp: new Date().toISOString(),
@@ -240,8 +296,11 @@ export async function createSession(
 
     // Handle presence updates (online/offline, typing)
     socket.ev.on('presence.update', async (presence) => {
-      if (session.webhook_url) {
-        await sendWebhook(session.webhook_url, {
+      const runtime = sessionStore.get(sessionId)
+
+      // Send webhook if configured
+      if (runtime?.webhookUrl) {
+        await sendWebhook(runtime?.webhookUrl, {
           event: 'presence.update',
           sessionId,
           timestamp: new Date().toISOString(),

@@ -7,6 +7,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { getSession } from '../services/whatsappService';
 import { Session } from '../models/Session';
+import { sessionStore } from '../services/sessionStore'
 
 // Types
 interface SessionParams {
@@ -521,6 +522,12 @@ export async function updateWebhookHandler(
 
     session.webhook_url = webhook_url || '';
     await session.save();
+
+    const runtime = sessionStore.get(sessionId);
+    
+    if (runtime) {
+      runtime.webhookUrl = session.webhook_url // 🔥 live update
+    }
 
     reply.send({
       success: true,

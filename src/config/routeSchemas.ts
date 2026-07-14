@@ -234,6 +234,44 @@ export const MessagingSchemas = {
       },
     },
   },
+  read: {
+    tags: ['Messaging'],
+    summary: 'Mark message as read',
+    security: [{ ApiKeyAuth: [] }],
+    params: {
+      type: 'object' as const,
+      properties: {
+        sessionId: { type: 'string' as const },
+      },
+    },
+    body: {
+      type: 'object' as const,
+      required: ['remoteJid', 'messageId'],
+      properties: {
+        remoteJid: { type: 'string' as const },
+        messageId: { type: 'string' as const },
+      },
+    },
+  },
+  presence: {
+    tags: ['Messaging'],
+    summary: 'Send presence update',
+    security: [{ ApiKeyAuth: [] }],
+    params: {
+      type: 'object' as const,
+      properties: {
+        sessionId: { type: 'string' as const },
+      },
+    },
+    body: {
+      type: 'object' as const,
+      required: ['remoteJid', 'presence'],
+      properties: {
+        remoteJid: { type: 'string' as const },
+        presence: { type: 'string' as const, enum: ['composing', 'paused'] },
+      },
+    },
+  },
   sendGroup: {
     tags: ['Messaging'],
     summary: 'Send to group',
