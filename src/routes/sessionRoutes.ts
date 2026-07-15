@@ -27,7 +27,24 @@ import {
   leaveGroupHandler,
   updateWebhookHandler,
   mentionHandler,
+  promoteHandler,
+  demoteHandler,
+  updateGroupSettingsHandler,
+  updateGroupSubjectHandler,
+  updateGroupDescriptionHandler,
+  getInviteLinkHandler,
+  revokeInviteLinkHandler,
 } from '../controllers/groupController';
+import {
+  reactHandler,
+  sendPollHandler,
+  sendLocationHandler,
+  sendContactHandler,
+  deleteMessageHandler,
+  checkNumberHandler,
+  acceptInviteHandler,
+  getInviteInfoHandler,
+} from '../controllers/messageController';
 import {
   listWebhookEndpointsHandler,
   createWebhookEndpointHandler,
@@ -51,6 +68,7 @@ import {
   ScheduledSchemas, 
   GroupSchemas,
   WebhookSchemas,
+  MessageSchemas,
 } from '../config/routeSchemas';
 
 /**
@@ -143,6 +161,55 @@ export async function sessionRoutes(
 
   // Mention users in group
   fastify.post('/session/:sessionId/groups/:groupId/mention', { schema: GroupSchemas.mention }, mentionHandler);
+
+  // Promote participants to admin
+  fastify.post('/session/:sessionId/groups/:groupId/promote', { schema: GroupSchemas.promote }, promoteHandler);
+
+  // Demote participants from admin
+  fastify.post('/session/:sessionId/groups/:groupId/demote', { schema: GroupSchemas.demote }, demoteHandler);
+
+  // Update group settings
+  fastify.put('/session/:sessionId/groups/:groupId/settings', { schema: GroupSchemas.settings }, updateGroupSettingsHandler);
+
+  // Update group subject
+  fastify.put('/session/:sessionId/groups/:groupId/subject', { schema: GroupSchemas.subject }, updateGroupSubjectHandler);
+
+  // Update group description
+  fastify.put('/session/:sessionId/groups/:groupId/description', { schema: GroupSchemas.description }, updateGroupDescriptionHandler);
+
+  // Get group invite link
+  fastify.get('/session/:sessionId/groups/:groupId/invite', { schema: GroupSchemas.getInvite }, getInviteLinkHandler);
+
+  // Revoke group invite link
+  fastify.post('/session/:sessionId/groups/:groupId/invite/revoke', { schema: GroupSchemas.revokeInvite }, revokeInviteLinkHandler);
+
+  // ========================================
+  // SPECIAL MESSAGE TYPES
+  // ========================================
+
+  // React to a message
+  fastify.post('/session/:sessionId/react', { schema: MessageSchemas.react }, reactHandler);
+
+  // Send poll
+  fastify.post('/session/:sessionId/send-poll', { schema: MessageSchemas.sendPoll }, sendPollHandler);
+
+  // Send location
+  fastify.post('/session/:sessionId/send-location', { schema: MessageSchemas.sendLocation }, sendLocationHandler);
+
+  // Send contact card (vCard)
+  fastify.post('/session/:sessionId/send-contact', { schema: MessageSchemas.sendContact }, sendContactHandler);
+
+  // Delete message
+  fastify.delete('/session/:sessionId/message', { schema: MessageSchemas.deleteMessage }, deleteMessageHandler);
+
+  // Check number on WhatsApp
+  fastify.post('/session/:sessionId/check-number', { schema: MessageSchemas.checkNumber }, checkNumberHandler);
+
+  // Accept group invite
+  fastify.post('/session/:sessionId/accept-invite', { schema: MessageSchemas.acceptInvite }, acceptInviteHandler);
+
+  // Get invite info
+  fastify.post('/session/:sessionId/invite-info', { schema: MessageSchemas.inviteInfo }, getInviteInfoHandler);
 
   // ========================================
   // WEBHOOK MANAGEMENT

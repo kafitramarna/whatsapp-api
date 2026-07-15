@@ -485,6 +485,85 @@ export const GroupSchemas = {
       },
     },
   },
+  promote: {
+    tags: ['Groups'],
+    summary: 'Promote to admin',
+    description: 'Promote participants to group admin',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['participants'],
+      properties: {
+        participants: { type: 'array' as const, items: { type: 'string' as const } },
+      },
+    },
+  },
+  demote: {
+    tags: ['Groups'],
+    summary: 'Demote from admin',
+    description: 'Demote admins to regular participants',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['participants'],
+      properties: {
+        participants: { type: 'array' as const, items: { type: 'string' as const } },
+      },
+    },
+  },
+  settings: {
+    tags: ['Groups'],
+    summary: 'Update group settings',
+    description: 'Set group to announcement, locked, or unlocked mode',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['setting'],
+      properties: {
+        setting: { type: 'string' as const, enum: ['announcement', 'unlocked', 'locked'], description: 'Group setting mode' },
+      },
+      example: { setting: 'announcement' },
+    },
+  },
+  subject: {
+    tags: ['Groups'],
+    summary: 'Update group subject',
+    description: 'Change the group name',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['subject'],
+      properties: {
+        subject: { type: 'string' as const, description: 'New group subject/name' },
+      },
+      example: { subject: 'My Group' },
+    },
+  },
+  description: {
+    tags: ['Groups'],
+    summary: 'Update group description',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['description'],
+      properties: {
+        description: { type: 'string' as const, description: 'New group description' },
+      },
+      example: { description: 'This is a test group' },
+    },
+  },
+  getInvite: {
+    tags: ['Groups'],
+    summary: 'Get invite link',
+    description: 'Get the current group invite code/link',
+    security: [{ ApiKeyAuth: [] }],
+  },
+  revokeInvite: {
+    tags: ['Groups'],
+    summary: 'Revoke invite link',
+    description: 'Revoke the current invite link and generate a new one',
+    security: [{ ApiKeyAuth: [] }],
+  },
 };
 
 // User schemas
@@ -652,6 +731,140 @@ export const WebhookSchemas = {
   },
 };
 
+// Message schemas (special message types)
+export const MessageSchemas = {
+  react: {
+    tags: ['Messages'],
+    summary: 'React to message',
+    description: 'React to a message with an emoji',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['to', 'messageId', 'emoji'],
+      properties: {
+        to: { type: 'string' as const, description: 'Phone number or JID' },
+        messageId: { type: 'string' as const, description: 'ID of message to react to' },
+        emoji: { type: 'string' as const, description: 'Emoji to react with (e.g., "👍")' },
+      },
+      example: { to: '6281234567890', messageId: 'msg123', emoji: '👍' },
+    },
+  },
+  sendPoll: {
+    tags: ['Messages'],
+    summary: 'Send poll',
+    description: 'Send a poll message with selectable options',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['to', 'name', 'options'],
+      properties: {
+        to: { type: 'string' as const, description: 'Phone number or JID' },
+        name: { type: 'string' as const, description: 'Poll question/title' },
+        options: {
+          type: 'array' as const,
+          items: { type: 'string' as const },
+          description: 'Poll options (min 2)',
+        },
+        selectableCount: { type: 'integer' as const, default: 1, description: 'How many options can be selected' },
+      },
+      example: { to: '6281234567890', name: 'Lunch?', options: ['Pizza', 'Burger', 'Salad'], selectableCount: 1 },
+    },
+  },
+  sendLocation: {
+    tags: ['Messages'],
+    summary: 'Send location',
+    description: 'Send a location message with coordinates',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['to', 'latitude', 'longitude'],
+      properties: {
+        to: { type: 'string' as const, description: 'Phone number or JID' },
+        latitude: { type: 'number' as const, description: 'Latitude coordinate' },
+        longitude: { type: 'number' as const, description: 'Longitude coordinate' },
+        name: { type: 'string' as const, description: 'Location name (optional)' },
+        address: { type: 'string' as const, description: 'Location address (optional)' },
+      },
+      example: { to: '6281234567890', latitude: -6.2088, longitude: 106.8456, name: 'Monas', address: 'Jakarta' },
+    },
+  },
+  sendContact: {
+    tags: ['Messages'],
+    summary: 'Send contact card',
+    description: 'Send a contact card (vCard) to a recipient',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['to', 'name', 'phoneNumber'],
+      properties: {
+        to: { type: 'string' as const, description: 'Phone number or JID' },
+        name: { type: 'string' as const, description: 'Contact display name' },
+        phoneNumber: { type: 'string' as const, description: 'Contact phone number' },
+        organization: { type: 'string' as const, description: 'Contact organization (optional)' },
+      },
+      example: { to: '6281234567890', name: 'John Doe', phoneNumber: '6289876543210', organization: 'ACME Corp' },
+    },
+  },
+  deleteMessage: {
+    tags: ['Messages'],
+    summary: 'Delete message',
+    description: 'Delete a message for me or for everyone',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['to', 'messageId', 'deleteFor'],
+      properties: {
+        to: { type: 'string' as const, description: 'Phone number or JID' },
+        messageId: { type: 'string' as const, description: 'ID of message to delete' },
+        deleteFor: { type: 'string' as const, enum: ['me', 'everyone'], description: 'Delete for me or everyone' },
+      },
+      example: { to: '6281234567890', messageId: 'msg123', deleteFor: 'everyone' },
+    },
+  },
+  checkNumber: {
+    tags: ['Messages'],
+    summary: 'Check number on WhatsApp',
+    description: 'Check if a phone number is registered on WhatsApp',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['phoneNumber'],
+      properties: {
+        phoneNumber: { type: 'string' as const, description: 'Phone number to check' },
+      },
+      example: { phoneNumber: '6281234567890' },
+    },
+  },
+  acceptInvite: {
+    tags: ['Groups'],
+    summary: 'Accept invite code',
+    description: 'Accept a group invite code and join the group',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['code'],
+      properties: {
+        code: { type: 'string' as const, description: 'Invite code (from invite link)' },
+      },
+      example: { code: 'abc123XYZ' },
+    },
+  },
+  inviteInfo: {
+    tags: ['Groups'],
+    summary: 'Get invite info',
+    description: 'Get information about a group from an invite code',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['code'],
+      properties: {
+        code: { type: 'string' as const, description: 'Invite code' },
+      },
+      example: { code: 'abc123XYZ' },
+    },
+  },
+};
+
 export default {
   AuthSchemas,
   SessionSchemas,
@@ -660,4 +873,5 @@ export default {
   GroupSchemas,
   UserSchemas,
   WebhookSchemas,
+  MessageSchemas,
 };
