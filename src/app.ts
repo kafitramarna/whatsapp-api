@@ -17,9 +17,11 @@ import { swaggerConfig } from './config/swagger';
 import { sessionRoutes } from './routes/sessionRoutes';
 import { userRoutes } from './routes/userRoutes';
 import { authRoutes } from './routes/authRoutes';
+import { logRoutes } from './routes/logRoutes';
 import { restoreAllSessions, closeAllSessions } from './services/whatsappService';
 import { startScheduler, stopScheduler } from './services/schedulerService';
 import { User } from './models/User';
+import { apiLogger } from './plugins/apiLogger';
 
 // Create Fastify instance
 const app: FastifyInstance = Fastify({
@@ -85,6 +87,9 @@ async function registerPlugins(): Promise<void> {
   await app.register(helmet, {
     contentSecurityPolicy: false,
   });
+
+  // API request logging to database
+  await app.register(apiLogger);
 
   // Health check route (no auth required)
   app.get('/health', {
@@ -156,6 +161,9 @@ async function registerPlugins(): Promise<void> {
 
   // Register auth routes under /api prefix (PUBLIC - no auth required)
   await app.register(authRoutes, { prefix: '/api' });
+
+  // Register log routes under /api prefix (admin only)
+  await app.register(logRoutes, { prefix: '/api' });
 }
 
 /**
@@ -181,6 +189,7 @@ async function seedDatabase(): Promise<void> {
       console.log(`API Key:  ${adminUser.api_key}`);
       console.log('='.repeat(60));
       console.log('⚠️  Please change the password after first login!');
+      console.log('⚠️  Save your API Key now — it will NOT be shown again!');
       console.log('='.repeat(60));
     }
   } catch (error) {

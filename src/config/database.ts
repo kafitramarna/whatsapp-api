@@ -9,6 +9,7 @@ import { User } from '../models/User';
 import { Session } from '../models/Session';
 import { AuthKey } from '../models/AuthKey';
 import { ScheduledMessage } from '../models/ScheduledMessage';
+import { ApiLog } from '../models/ApiLog';
 
 // Create Sequelize instance with MySQL
 export const sequelize = new Sequelize({
@@ -20,7 +21,7 @@ export const sequelize = new Sequelize({
   password: env.db.password,
 
   // Register models explicitly
-  models: [User, Session, AuthKey, ScheduledMessage],
+  models: [User, Session, AuthKey, ScheduledMessage, ApiLog],
 
   // Logging configuration
   logging: env.isDev ? console.log : false,
