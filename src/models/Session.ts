@@ -78,7 +78,14 @@ export class Session extends Model {
     allowNull: true,
     comment: 'HMAC secret for webhook payload signing',
   })
-  declare webhook_secret: string;
+  declare webhook_secret: string | null;
+
+  @Column({
+    type: DataType.TEXT,
+    allowNull: true,
+    comment: 'JSON array of event types to filter. Empty/null = all events',
+  })
+  declare webhook_events: string | null;
 
   @Column({
     type: DataType.STRING(20),

@@ -2,4 +2,5 @@
 export const sessionStore = new Map<string, {
       webhookUrl: string;
       webhookSecret?: string;
+      webhookEvents?: string[];
 }>();

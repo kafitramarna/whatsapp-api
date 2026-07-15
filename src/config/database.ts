@@ -10,6 +10,8 @@ import { Session } from '../models/Session';
 import { AuthKey } from '../models/AuthKey';
 import { ScheduledMessage } from '../models/ScheduledMessage';
 import { ApiLog } from '../models/ApiLog';
+import { WebhookEndpoint } from '../models/WebhookEndpoint';
+import { WebhookLog } from '../models/WebhookLog';
 
 // Create Sequelize instance with MySQL
 export const sequelize = new Sequelize({
@@ -21,7 +23,7 @@ export const sequelize = new Sequelize({
   password: env.db.password,
 
   // Register models explicitly
-  models: [User, Session, AuthKey, ScheduledMessage, ApiLog],
+  models: [User, Session, AuthKey, ScheduledMessage, ApiLog, WebhookEndpoint, WebhookLog],
 
   // Logging configuration
   logging: env.isDev ? console.log : false,
