@@ -8,7 +8,9 @@
     "build": "tsc",
     "start": "node dist/app.js",
     "lint": "eslint src/**/*.ts",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "keywords": [
     "whatsapp",
@@ -42,13 +44,18 @@
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.10.2",
     "@types/qrcode": "^1.5.5",
+    "@types/supertest": "^7.2.1",
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^8.18.1",
     "@typescript-eslint/parser": "^8.18.1",
     "eslint": "^9.17.0",
+    "jest": "^30.4.2",
     "rimraf": "^6.0.1",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.11",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.59.2"
