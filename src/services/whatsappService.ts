@@ -21,7 +21,8 @@ import { AuthKey } from '../models/AuthKey';
 import { env } from '../config/env';
 import QRCode from 'qrcode';
 import pino from 'pino';
-import { sessionStore } from './sessionStore'
+import { sessionStore } from './sessionStore';
+import { validateUrl } from '../lib/ssrfGuard';
 
 // Logger for Baileys (set to silent in production)
 const logger = pino({ level: env.isDev ? 'debug' : 'silent' });
@@ -228,7 +229,11 @@ export async function createSession(
 
     // Handle connection updates
     socket.ev.on('connection.update', async (update: Partial<ConnectionState>) => {
-      await handleConnectionUpdate(sessionId, session, update, saveCreds, deleteSession);
+      try {
+        await handleConnectionUpdate(sessionId, session, update, saveCreds, deleteSession);
+      } catch (error) {
+        console.error(`[WA] Error in connection.update handler for ${sessionId}:`, error);
+      }
     });
 
     // Save credentials when updated
@@ -236,76 +241,88 @@ export async function createSession(
 
     // Handle incoming messages
     socket.ev.on('messages.upsert', async (m) => {
-      // Format messages for webhook
-      const messages = m.messages.map((msg) => ({
-        id: msg.key.id,
-        from: msg.key.remoteJid,
-        fromMe: msg.key.fromMe,
-        timestamp: msg.messageTimestamp,
-        type: getMessageType(msg.message),
-        text: msg.message?.conversation || 
-              msg.message?.extendedTextMessage?.text ||
-              msg.message?.imageMessage?.caption ||
-              msg.message?.videoMessage?.caption ||
-              msg.message?.documentMessage?.caption || null,
-        pushName: msg.pushName,
-        hasMedia: !!(msg.message?.imageMessage || msg.message?.videoMessage || 
-                     msg.message?.audioMessage || msg.message?.documentMessage ||
-                     msg.message?.stickerMessage),
-      }));
+      try {
+        // Format messages for webhook
+        const messages = m.messages.map((msg) => ({
+          id: msg.key.id,
+          from: msg.key.remoteJid,
+          fromMe: msg.key.fromMe,
+          timestamp: msg.messageTimestamp,
+          type: getMessageType(msg.message),
+          text: msg.message?.conversation || 
+                msg.message?.extendedTextMessage?.text ||
+                msg.message?.imageMessage?.caption ||
+                msg.message?.videoMessage?.caption ||
+                msg.message?.documentMessage?.caption || null,
+          pushName: msg.pushName,
+          hasMedia: !!(msg.message?.imageMessage || msg.message?.videoMessage || 
+                       msg.message?.audioMessage || msg.message?.documentMessage ||
+                       msg.message?.stickerMessage),
+        }));
 
 
-      const runtime = sessionStore.get(sessionId)
+        const runtime = sessionStore.get(sessionId)
 
-      // Send webhook if configured
-      if (runtime?.webhookUrl) {
-        await sendWebhook(runtime?.webhookUrl, {
-          event: 'message.received',
-          sessionId,
-          timestamp: new Date().toISOString(),
-          data: {
-            type: m.type,
-            messages,
-          },
-        });
+        // Send webhook if configured
+        if (runtime?.webhookUrl) {
+          await sendWebhook(runtime?.webhookUrl, {
+            event: 'message.received',
+            sessionId,
+            timestamp: new Date().toISOString(),
+            data: {
+              type: m.type,
+              messages,
+            },
+          });
+        }
+      } catch (error) {
+        console.error(`[WA] Error in messages.upsert handler for ${sessionId}:`, error);
       }
     });
 
     // Handle message status updates (sent, delivered, read)
     socket.ev.on('messages.update', async (updates) => {
-      const statusUpdates = updates.map((update) => ({
-        id: update.key.id,
-        remoteJid: update.key.remoteJid,
-        fromMe: update.key.fromMe,
-        status: getStatusName(update.update?.status ?? undefined),
-        statusCode: update.update?.status ?? undefined,
-      }));
+      try {
+        const statusUpdates = updates.map((update) => ({
+          id: update.key.id,
+          remoteJid: update.key.remoteJid,
+          fromMe: update.key.fromMe,
+          status: getStatusName(update.update?.status ?? undefined),
+          statusCode: update.update?.status ?? undefined,
+        }));
 
-      const runtime = sessionStore.get(sessionId);
+        const runtime = sessionStore.get(sessionId);
 
-      // Send webhook if configured
-      if (runtime?.webhookUrl) {
-        await sendWebhook(runtime?.webhookUrl, {
-          event: 'message.status',
-          sessionId,
-          timestamp: new Date().toISOString(),
-          data: statusUpdates,
-        });
+        // Send webhook if configured
+        if (runtime?.webhookUrl) {
+          await sendWebhook(runtime?.webhookUrl, {
+            event: 'message.status',
+            sessionId,
+            timestamp: new Date().toISOString(),
+            data: statusUpdates,
+          });
+        }
+      } catch (error) {
+        console.error(`[WA] Error in messages.update handler for ${sessionId}:`, error);
       }
     });
 
     // Handle presence updates (online/offline, typing)
     socket.ev.on('presence.update', async (presence) => {
-      const runtime = sessionStore.get(sessionId)
+      try {
+        const runtime = sessionStore.get(sessionId)
 
-      // Send webhook if configured
-      if (runtime?.webhookUrl) {
-        await sendWebhook(runtime?.webhookUrl, {
-          event: 'presence.update',
-          sessionId,
-          timestamp: new Date().toISOString(),
-          data: presence,
-        });
+        // Send webhook if configured
+        if (runtime?.webhookUrl) {
+          await sendWebhook(runtime?.webhookUrl, {
+            event: 'presence.update',
+            sessionId,
+            timestamp: new Date().toISOString(),
+            data: presence,
+          });
+        }
+      } catch (error) {
+        console.error(`[WA] Error in presence.update handler for ${sessionId}:`, error);
       }
     });
 
@@ -367,7 +384,13 @@ async function handleConnectionUpdate(
         // Wait before reconnecting
         await new Promise((resolve) => setTimeout(resolve, env.wa.reconnectInterval));
         
-        // Remove old socket
+        // Remove old socket — clean up event listeners to prevent leaks
+        const oldSocket = sessions.get(sessionId);
+        if (oldSocket) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (oldSocket.ev as any).removeAllListeners();
+          try { oldSocket.end(undefined); } catch (e) { console.error('[WA] Error ending old socket:', e); }
+        }
         sessions.delete(sessionId);
         
         // Reconnect
@@ -376,6 +399,12 @@ async function handleConnectionUpdate(
       } else {
         console.log(`[WA] Max retries reached for ${sessionId}`);
         await session.updateStatus(SessionStatus.DISCONNECTED);
+        const oldSocket = sessions.get(sessionId);
+        if (oldSocket) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (oldSocket.ev as any).removeAllListeners();
+          try { oldSocket.end(undefined); } catch (e) { console.error('[WA] Error ending old socket:', e); }
+        }
         sessions.delete(sessionId);
       }
     } else {
@@ -383,7 +412,14 @@ async function handleConnectionUpdate(
       console.log(`[WA] Session ${sessionId} logged out`);
       await session.updateStatus(SessionStatus.LOGGED_OUT);
       await deleteSessionAuth();
+      const oldSocket = sessions.get(sessionId);
+      if (oldSocket) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (oldSocket.ev as any).removeAllListeners();
+        try { oldSocket.end(undefined); } catch (e) { console.error('[WA] Error ending old socket:', e); }
+      }
       sessions.delete(sessionId);
+      sessionStore.delete(sessionId);
     }
   }
 
@@ -411,7 +447,9 @@ export async function deleteSession(sessionId: string): Promise<boolean> {
     // Get socket and logout
     const socket = sessions.get(sessionId);
     if (socket) {
-      await socket.logout();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (socket.ev as any).removeAllListeners();
+      try { await socket.logout(); } catch (e) { console.error('[WA] Error logging out:', e); }
       sessions.delete(sessionId);
     }
 
@@ -422,6 +460,7 @@ export async function deleteSession(sessionId: string): Promise<boolean> {
     // Clean up
     qrCodes.delete(sessionId);
     retryCounters.delete(sessionId);
+    sessionStore.delete(sessionId);
 
     console.log(`[WA] Session ${sessionId} deleted`);
     return true;
@@ -498,6 +537,7 @@ export async function restoreAllSessions(): Promise<void> {
  */
 async function sendWebhook(url: string, data: unknown): Promise<void> {
   try {
+    await validateUrl(url);
     await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
