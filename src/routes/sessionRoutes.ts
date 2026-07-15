@@ -26,6 +26,7 @@ import {
   removeGroupParticipantsHandler,
   leaveGroupHandler,
   updateWebhookHandler,
+  mentionHandler,
 } from '../controllers/groupController';
 import {
   createScheduledHandler,
@@ -128,6 +129,9 @@ export async function sessionRoutes(
 
   // Leave group
   fastify.delete('/session/:sessionId/groups/:groupId', { schema: GroupSchemas.leave }, leaveGroupHandler);
+
+  // Mention users in group
+  fastify.post('/session/:sessionId/groups/:groupId/mention', { schema: GroupSchemas.mention }, mentionHandler);
 }
 
 export default sessionRoutes;
