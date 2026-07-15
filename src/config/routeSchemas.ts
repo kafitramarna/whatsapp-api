@@ -31,9 +31,14 @@ export const AuthSchemas = {
       type: 'object' as const,
       required: ['username', 'password'],
       properties: {
-        username: { type: 'string' as const, minLength: 3, example: 'new_user' },
+        username: { type: 'string' as const, example: 'new_user' },
         email: { type: 'string' as const, format: 'email', example: 'user@example.com' },
         password: { type: 'string' as const, minLength: 6, example: 'password123' },
+      },
+      example: {
+        username: 'new_user',
+        email: 'user@example.com',
+        password: 'password123',
       },
     },
     response: {
@@ -57,13 +62,17 @@ export const AuthSchemas = {
   login: {
     tags: ['Auth'],
     summary: 'User login',
-    description: 'Authenticate and get API key',
+    description: 'Authenticate with username + password. Returns API key (plaintext for existing users with old column, masked for new users). Use /auth/regenerate-key if you lost your API key.',
     body: {
       type: 'object' as const,
       required: ['username', 'password'],
       properties: {
-        username: { type: 'string' as const, example: 'admin_user' },
-        password: { type: 'string' as const, example: 'securePassword123' },
+        username: { type: 'string' as const, example: 'admin' },
+        password: { type: 'string' as const, example: 'admin123' },
+      },
+      example: {
+        username: 'admin',
+        password: 'admin123',
       },
     },
     response: {
@@ -76,8 +85,44 @@ export const AuthSchemas = {
             properties: {
               id: { type: 'string' as const },
               username: { type: 'string' as const },
-              role: { type: 'string' as const },
-              api_key: { type: 'string' as const },
+              email: { type: 'string' as const, nullable: true },
+              api_key: { type: 'string' as const, description: 'Full API key (existing users) or masked **** (new users)' },
+              last_login: { type: 'string' as const, format: 'date-time' },
+            },
+          },
+        },
+      },
+      401: ErrorResponseSchema,
+    },
+  },
+  regenerateKey: {
+    tags: ['Auth'],
+    summary: 'Regenerate API key',
+    description: 'Regenerate API key using username + password. Use this when you lost your API key and cannot authenticate via x-api-key header. The new key is only shown once.',
+    body: {
+      type: 'object' as const,
+      required: ['username', 'password'],
+      properties: {
+        username: { type: 'string' as const, example: 'admin' },
+        password: { type: 'string' as const, example: 'admin123' },
+      },
+      example: {
+        username: 'admin',
+        password: 'admin123',
+      },
+    },
+    response: {
+      200: {
+        type: 'object' as const,
+        properties: {
+          success: { type: 'boolean' as const },
+          message: { type: 'string' as const },
+          data: {
+            type: 'object' as const,
+            properties: {
+              id: { type: 'string' as const },
+              username: { type: 'string' as const },
+              api_key: { type: 'string' as const, description: 'New API key — save this, it will not be shown again' },
             },
           },
         },

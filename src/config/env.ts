@@ -21,9 +21,6 @@ export const env = {
     password: process.env.DB_PASS || '',
   },
 
-  // API Security
-  apiSecret: process.env.API_SECRET || 'default-secret-change-me',
-
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',
 

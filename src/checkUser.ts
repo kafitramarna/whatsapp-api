@@ -24,6 +24,7 @@ async function checkUser() {
       console.log('Username: admin');
       console.log('Password: admin123');
       console.log(`API Key: ${admin.api_key}`);
+      console.log('⚠️  Save your API Key now — it will NOT be shown again!');
       console.log('============================================================');
     } else {
       console.log('');
@@ -32,7 +33,7 @@ async function checkUser() {
       console.log('============================================================');
       for (const user of users) {
         console.log(`Username: ${user.username}`);
-        console.log(`API Key: ${user.api_key}`);
+        console.log(`API Key: ${user.getMaskedApiKey()}`);
         console.log('------------------------------------------------------------');
       }
     }

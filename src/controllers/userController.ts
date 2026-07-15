@@ -64,7 +64,7 @@ export async function createUserHandler(
         id: user.id,
         username: user.username,
         email: user.email,
-        api_key: user.api_key,
+        api_key: user.api_key, // Only shown once at creation
         is_active: user.is_active,
         created_at: user.createdAt,
       },
@@ -88,12 +88,18 @@ export async function listUsersHandler(
 ): Promise<void> {
   try {
     const users = await User.findAll({
-      attributes: ['id', 'username', 'email', 'api_key', 'is_active', 'last_login', 'createdAt'],
+      attributes: ['id', 'username', 'email', 'is_active', 'last_login', 'createdAt'],
     });
+
+    // Mask API keys in list response
+    const maskedUsers = users.map((u) => ({
+      ...u.toJSON(),
+      api_key: u.getMaskedApiKey(),
+    }));
 
     reply.send({
       success: true,
-      data: users,
+      data: maskedUsers,
     });
   } catch (error) {
     console.error('[User] List error:', error);
@@ -116,7 +122,7 @@ export async function getUserHandler(
     const { userId } = request.params;
 
     const user = await User.findByPk(userId, {
-      attributes: ['id', 'username', 'email', 'api_key', 'is_active', 'last_login', 'createdAt'],
+      attributes: ['id', 'username', 'email', 'is_active', 'last_login', 'createdAt'],
     });
 
     if (!user) {
@@ -129,7 +135,10 @@ export async function getUserHandler(
 
     reply.send({
       success: true,
-      data: user,
+      data: {
+        ...user.toJSON(),
+        api_key: user.getMaskedApiKey(),
+      },
     });
   } catch (error) {
     console.error('[User] Get error:', error);
@@ -272,7 +281,7 @@ export async function regenerateApiKeyHandler(
       data: {
         id: user.id,
         username: user.username,
-        api_key: newApiKey,
+        api_key: newApiKey, // Only shown once at regeneration
       },
     });
   } catch (error) {
@@ -309,7 +318,7 @@ export async function getMeHandler(
         id: user.id,
         username: user.username,
         email: user.email,
-        api_key: user.api_key,
+        api_key: user.getMaskedApiKey(),
         is_active: user.is_active,
         last_login: user.last_login,
         created_at: user.createdAt,

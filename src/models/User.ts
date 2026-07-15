@@ -8,7 +8,6 @@ import {
   HasMany,
   BeforeCreate,
   BeforeUpdate,
-  BeforeValidate,
 } from 'sequelize-typescript';
 import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
@@ -53,8 +52,9 @@ export class User extends Model {
 
   @Unique
   @Column({
-    type: DataType.STRING(64),
-    allowNull: true, // Allow null initially, will be set by hook
+    type: DataType.STRING(255),
+    allowNull: true,
+    comment: 'API key for authentication',
   })
   declare api_key: string;
 
@@ -79,9 +79,9 @@ export class User extends Model {
   declare sessions: Session[];
 
   /**
-   * Hook: Generate UUID and API key BEFORE validation
+   * Hook: Generate UUID and API key before creating a new user
    */
-  @BeforeValidate
+  @BeforeCreate
   static generateApiKey(user: User): void {
     if (!user.id) {
       user.id = uuidv4();
@@ -120,6 +120,7 @@ export class User extends Model {
 
   /**
    * Regenerate API key
+   * Returns the new plaintext key
    */
   async regenerateApiKey(): Promise<string> {
     this.api_key = uuidv4().replace(/-/g, '') + uuidv4().replace(/-/g, '');
@@ -134,6 +135,26 @@ export class User extends Model {
     const values = { ...this.get() };
     delete (values as Record<string, unknown>).password;
     return values;
+  }
+
+  /**
+   * Mask API key for display (show only last 4 chars)
+   */
+  getMaskedApiKey(): string {
+    if (!this.api_key) return '****';
+    return '****' + this.api_key.slice(-4);
+  }
+
+  /**
+   * Static: Find user by API key
+   */
+  static async findByApiKey(apiKey: string): Promise<User | null> {
+    return User.findOne({
+      where: {
+        api_key: apiKey,
+        is_active: true,
+      },
+    });
   }
 }
 

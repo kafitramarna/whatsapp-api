@@ -32,13 +32,8 @@ export async function apiKeyAuth(
   }
 
   try {
-    // Find user by API key
-    const user = await User.findOne({
-      where: {
-        api_key: apiKey,
-        is_active: true,
-      },
-    });
+    // Find user by API key (hashed lookup)
+    const user = await User.findByApiKey(apiKey);
 
     if (!user) {
       reply.status(401).send({

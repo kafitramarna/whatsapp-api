@@ -20,6 +20,11 @@ interface LoginBody {
   password: string;
 }
 
+interface RegenerateKeyBody {
+  username: string;
+  password: string;
+}
+
 /**
  * Register a new user (PUBLIC - no auth required)
  * POST /auth/register
@@ -167,6 +172,72 @@ async function loginHandler(
 }
 
 /**
+ * Regenerate API key using username + password (PUBLIC - no API key required)
+ * POST /auth/regenerate-key
+ * Use this when you lost your API key and can't authenticate anymore.
+ */
+async function regenerateKeyHandler(
+  request: FastifyRequest<{ Body: RegenerateKeyBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { username, password } = request.body;
+
+    if (!username || !password) {
+      reply.status(400).send({
+        success: false,
+        error: 'Username and password are required',
+      });
+      return;
+    }
+
+    const user = await User.findOne({ where: { username } });
+    if (!user) {
+      reply.status(401).send({
+        success: false,
+        error: 'Invalid username or password',
+      });
+      return;
+    }
+
+    if (!user.is_active) {
+      reply.status(401).send({
+        success: false,
+        error: 'Account is disabled',
+      });
+      return;
+    }
+
+    const isValid = await user.verifyPassword(password);
+    if (!isValid) {
+      reply.status(401).send({
+        success: false,
+        error: 'Invalid username or password',
+      });
+      return;
+    }
+
+    const newKey = await user.regenerateApiKey();
+
+    reply.send({
+      success: true,
+      message: 'API key regenerated successfully',
+      data: {
+        id: user.id,
+        username: user.username,
+        api_key: newKey,
+      },
+    });
+  } catch (error) {
+    console.error('[Auth] Regenerate key error:', error);
+    reply.status(500).send({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to regenerate API key',
+    });
+  }
+}
+
+/**
  * Register auth routes (PUBLIC - no authentication)
  */
 export async function authRoutes(
@@ -178,6 +249,9 @@ export async function authRoutes(
 
   // Login
   fastify.post('/auth/login', { schema: AuthSchemas.login }, loginHandler);
+
+  // Regenerate API key (uses username + password, no API key needed)
+  fastify.post('/auth/regenerate-key', { schema: AuthSchemas.regenerateKey }, regenerateKeyHandler);
 }
 
 export default authRoutes;
