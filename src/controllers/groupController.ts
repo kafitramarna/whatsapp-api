@@ -570,6 +570,273 @@ export async function mentionHandler(
   }
 }
 
+// ========================================
+// PROMOTE / DEMOTE
+// ========================================
+
+/**
+ * Promote participants to admin
+ * POST /session/:sessionId/groups/:groupId/promote
+ */
+export async function promoteHandler(
+  request: FastifyRequest<{ Params: GroupParams; Body: GroupMembersBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const { participants } = request.body;
+    const user = request.user!;
+
+    if (!participants || participants.length === 0) {
+      reply.status(400).send({ success: false, error: 'Participants required' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+    const jids = participants.map((p) => p.includes('@') ? p : `${p.replace(/[^0-9]/g, '')}@s.whatsapp.net`);
+
+    const promoteResult = await socket.groupParticipantsUpdate(jid, jids, 'promote');
+
+    reply.send({ success: true, data: promoteResult });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+/**
+ * Demote participants from admin
+ * POST /session/:sessionId/groups/:groupId/demote
+ */
+export async function demoteHandler(
+  request: FastifyRequest<{ Params: GroupParams; Body: GroupMembersBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const { participants } = request.body;
+    const user = request.user!;
+
+    if (!participants || participants.length === 0) {
+      reply.status(400).send({ success: false, error: 'Participants required' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+    const jids = participants.map((p) => p.includes('@') ? p : `${p.replace(/[^0-9]/g, '')}@s.whatsapp.net`);
+
+    const demoteResult = await socket.groupParticipantsUpdate(jid, jids, 'demote');
+
+    reply.send({ success: true, data: demoteResult });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// GROUP SETTINGS
+// ========================================
+
+interface GroupSettingsBody {
+  setting: 'announcement' | 'unlocked' | 'locked';
+}
+
+/**
+ * Update group settings (announcement, locked, unlocked)
+ * PUT /session/:sessionId/groups/:groupId/settings
+ */
+export async function updateGroupSettingsHandler(
+  request: FastifyRequest<{ Params: GroupParams; Body: GroupSettingsBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const { setting } = request.body;
+    const user = request.user!;
+
+    if (!setting || !['announcement', 'unlocked', 'locked'].includes(setting)) {
+      reply.status(400).send({ success: false, error: 'setting must be "announcement", "unlocked", or "locked"' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+
+    await socket.groupSettingUpdate(jid, setting);
+
+    reply.send({ success: true, data: { groupId: jid, setting } });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// GROUP SUBJECT & DESCRIPTION
+// ========================================
+
+interface GroupSubjectBody {
+  subject: string;
+}
+
+interface GroupDescriptionBody {
+  description: string;
+}
+
+/**
+ * Update group subject (name)
+ * PUT /session/:sessionId/groups/:groupId/subject
+ */
+export async function updateGroupSubjectHandler(
+  request: FastifyRequest<{ Params: GroupParams; Body: GroupSubjectBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const { subject } = request.body;
+    const user = request.user!;
+
+    if (!subject) {
+      reply.status(400).send({ success: false, error: 'Missing subject' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+
+    await socket.groupUpdateSubject(jid, subject);
+
+    reply.send({ success: true, data: { groupId: jid, subject } });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+/**
+ * Update group description
+ * PUT /session/:sessionId/groups/:groupId/description
+ */
+export async function updateGroupDescriptionHandler(
+  request: FastifyRequest<{ Params: GroupParams; Body: GroupDescriptionBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const { description } = request.body;
+    const user = request.user!;
+
+    if (description === undefined || description === null) {
+      reply.status(400).send({ success: false, error: 'Missing description' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+
+    await socket.groupUpdateDescription(jid, description);
+
+    reply.send({ success: true, data: { groupId: jid, description } });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// INVITE LINK MANAGEMENT
+// ========================================
+
+/**
+ * Get group invite link/code
+ * GET /session/:sessionId/groups/:groupId/invite
+ */
+export async function getInviteLinkHandler(
+  request: FastifyRequest<{ Params: GroupParams }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const user = request.user!;
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+    const code = await socket.groupInviteCode(jid);
+
+    reply.send({
+      success: true,
+      data: { groupId: jid, code, inviteLink: `https://chat.whatsapp.com/${code}` },
+    });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+/**
+ * Revoke group invite link
+ * POST /session/:sessionId/groups/:groupId/invite/revoke
+ */
+export async function revokeInviteLinkHandler(
+  request: FastifyRequest<{ Params: GroupParams }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const user = request.user!;
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+    const newCode = await socket.groupRevokeInvite(jid);
+
+    reply.send({
+      success: true,
+      data: { groupId: jid, code: newCode, inviteLink: `https://chat.whatsapp.com/${newCode}` },
+    });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
 export default {
   sendToGroupHandler,
   broadcastHandler,
@@ -581,4 +848,11 @@ export default {
   leaveGroupHandler,
   updateWebhookHandler,
   mentionHandler,
+  promoteHandler,
+  demoteHandler,
+  updateGroupSettingsHandler,
+  updateGroupSubjectHandler,
+  updateGroupDescriptionHandler,
+  getInviteLinkHandler,
+  revokeInviteLinkHandler,
 };
