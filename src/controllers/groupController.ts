@@ -7,7 +7,9 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { getSession } from '../services/whatsappService';
 import { Session } from '../models/Session';
-import { sessionStore } from '../services/sessionStore'
+import { sessionStore } from '../services/sessionStore';
+import { safeFetch } from '../lib/ssrfGuard';
+import { env } from '../config/env';
 
 // Types
 interface SessionParams {
@@ -58,18 +60,20 @@ interface UpdateWebhookBody {
 }
 
 /**
- * Helper: Prepare media buffer (copied from sessionController)
+ * Helper: Prepare media buffer (with SSRF protection)
  */
 async function prepareMediaBuffer(mediaData: string): Promise<{ buffer: Buffer; mimetype?: string }> {
   if (mediaData.startsWith('http://') || mediaData.startsWith('https://')) {
-    const response = await fetch(mediaData);
-    if (!response.ok) throw new Error('Failed to fetch media from URL');
+    const response = await safeFetch(mediaData);
     const arrayBuffer = await response.arrayBuffer();
     const contentType = response.headers.get('content-type');
     return { buffer: Buffer.from(arrayBuffer), mimetype: contentType || undefined };
   }
   
   if (mediaData.startsWith('file://') || mediaData.match(/^[a-zA-Z]:[/\\]/) || mediaData.startsWith('/')) {
+    if (env.isProd) {
+      throw new Error('Local file paths are not allowed in production. Use base64 or URL instead.');
+    }
     const { readFile } = await import('fs/promises');
     const { fileURLToPath } = await import('url');
     let filePath = mediaData;

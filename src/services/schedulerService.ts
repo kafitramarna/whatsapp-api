@@ -4,27 +4,32 @@
  * Processes scheduled messages using node-cron
  */
 
-import cron from 'node-cron';
+import cron, { ScheduledTask } from 'node-cron';
 import { Op } from 'sequelize';
 import { ScheduledMessage, ScheduledMessageStatus } from '../models/ScheduledMessage';
 import { getSession } from './whatsappService';
+import { safeFetch } from '../lib/ssrfGuard';
+import { env } from '../config/env';
 
 // Flag to prevent multiple instances
 let isRunning = false;
+let cronTask: ScheduledTask | null = null;
 
 /**
  * Helper: Prepare media buffer
  */
 async function prepareMediaBuffer(mediaData: string): Promise<{ buffer: Buffer; mimetype?: string }> {
   if (mediaData.startsWith('http://') || mediaData.startsWith('https://')) {
-    const response = await fetch(mediaData);
-    if (!response.ok) throw new Error('Failed to fetch media from URL');
+    const response = await safeFetch(mediaData);
     const arrayBuffer = await response.arrayBuffer();
     const contentType = response.headers.get('content-type');
     return { buffer: Buffer.from(arrayBuffer), mimetype: contentType || undefined };
   }
   
   if (mediaData.startsWith('file://') || mediaData.match(/^[a-zA-Z]:[/\\]/) || mediaData.startsWith('/')) {
+    if (env.isProd) {
+      throw new Error('Local file paths are not allowed in production. Use base64 or URL instead.');
+    }
     const { readFile } = await import('fs/promises');
     const { fileURLToPath } = await import('url');
     let filePath = mediaData;
@@ -141,7 +146,7 @@ export function startScheduler(): void {
   console.log('[Scheduler] Starting scheduled message processor...');
   
   // Run every minute
-  cron.schedule('* * * * *', async () => {
+  cronTask = cron.schedule('* * * * *', async () => {
     await processScheduledMessages();
   });
 
@@ -152,6 +157,10 @@ export function startScheduler(): void {
  * Stop the scheduler
  */
 export function stopScheduler(): void {
+  if (cronTask) {
+    cronTask.stop();
+    cronTask = null;
+  }
   console.log('[Scheduler] Scheduler stopped.');
 }
 

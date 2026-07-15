@@ -17,6 +17,8 @@ import {
   qrCodes,
 } from '../services/whatsappService';
 import { Session } from '../models/Session';
+import { safeFetch } from '../lib/ssrfGuard';
+import { env } from '../config/env';
 
 // Request body types
 interface CreateSessionBody {
@@ -54,19 +56,19 @@ interface PresenceBody {
  * Helper: Prepare media buffer from URL, file path, or base64
  */
 async function prepareMediaBuffer(mediaData: string): Promise<{ buffer: Buffer; mimetype?: string }> {
-  // HTTP/HTTPS URL
+  // HTTP/HTTPS URL — with SSRF protection
   if (mediaData.startsWith('http://') || mediaData.startsWith('https://')) {
-    const response = await fetch(mediaData);
-    if (!response.ok) {
-      throw new Error('Failed to fetch media from URL');
-    }
+    const response = await safeFetch(mediaData);
     const arrayBuffer = await response.arrayBuffer();
     const contentType = response.headers.get('content-type');
     return { buffer: Buffer.from(arrayBuffer), mimetype: contentType || undefined };
   }
   
-  // Local file path (file:// protocol or absolute path)
+  // Local file path (file:// protocol or absolute path) — blocked in production
   if (mediaData.startsWith('file://') || mediaData.match(/^[a-zA-Z]:[/\\]/) || mediaData.startsWith('/')) {
+    if (env.isProd) {
+      throw new Error('Local file paths are not allowed in production. Use base64 or URL instead.');
+    }
     const { readFile } = await import('fs/promises');
     const { fileURLToPath } = await import('url');
     
