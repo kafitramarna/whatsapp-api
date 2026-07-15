@@ -8,8 +8,7 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { getSession } from '../services/whatsappService';
 import { Session } from '../models/Session';
 import { sessionStore } from '../services/sessionStore';
-import { safeFetch } from '../lib/ssrfGuard';
-import { env } from '../config/env';
+import { prepareMediaBuffer, buildMediaContent, type MediaItem } from '../lib/mediaUtils';
 
 // Types
 interface SessionParams {
@@ -19,25 +18,14 @@ interface SessionParams {
 interface SendToGroupBody {
   groupId: string;
   message?: string;
-  media?: Array<{
-    type: 'image' | 'video' | 'document' | 'audio' | 'sticker';
-    data: string;
-    caption?: string;
-    filename?: string;
-    mimetype?: string;
-  }>;
+  replyTo?: string;
+  media?: MediaItem[];
 }
 
 interface BroadcastBody {
   recipients: string[];
   message?: string;
-  media?: Array<{
-    type: 'image' | 'video' | 'document' | 'audio' | 'sticker';
-    data: string;
-    caption?: string;
-    filename?: string;
-    mimetype?: string;
-  }>;
+  media?: MediaItem[];
   delay?: number; // ms between messages (default: 1000)
 }
 
@@ -55,55 +43,16 @@ interface GroupMembersBody {
   participants: string[];
 }
 
+interface MentionBody {
+  message: string;
+  mentioned: string[]; // array of JIDs to mention
+}
+
 interface UpdateWebhookBody {
   webhook_url?: string | null;
+  webhook_secret?: string | null;
 }
 
-/**
- * Helper: Prepare media buffer (with SSRF protection)
- */
-async function prepareMediaBuffer(mediaData: string): Promise<{ buffer: Buffer; mimetype?: string }> {
-  if (mediaData.startsWith('http://') || mediaData.startsWith('https://')) {
-    const response = await safeFetch(mediaData);
-    const arrayBuffer = await response.arrayBuffer();
-    const contentType = response.headers.get('content-type');
-    return { buffer: Buffer.from(arrayBuffer), mimetype: contentType || undefined };
-  }
-  
-  if (mediaData.startsWith('file://') || mediaData.match(/^[a-zA-Z]:[/\\]/) || mediaData.startsWith('/')) {
-    if (env.isProd) {
-      throw new Error('Local file paths are not allowed in production. Use base64 or URL instead.');
-    }
-    const { readFile } = await import('fs/promises');
-    const { fileURLToPath } = await import('url');
-    let filePath = mediaData;
-    if (mediaData.startsWith('file://')) filePath = fileURLToPath(mediaData);
-    const buffer = await readFile(filePath);
-    const ext = filePath.split('.').pop()?.toLowerCase();
-    const mimeMap: Record<string, string> = {
-      'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif', 'webp': 'image/webp',
-      'mp4': 'video/mp4', 'pdf': 'application/pdf', 'mp3': 'audio/mpeg',
-    };
-    return { buffer, mimetype: ext ? mimeMap[ext] : undefined };
-  }
-  
-  const base64Data = mediaData.includes(',') ? mediaData.split(',')[1] : mediaData;
-  return { buffer: Buffer.from(base64Data, 'base64') };
-}
-
-/**
- * Helper: Build media content
- */
-function buildMediaContent(type: string, buffer: Buffer, mimetype?: string, caption?: string, filename?: string): Record<string, unknown> {
-  switch (type) {
-    case 'image': return { image: buffer, caption, mimetype: mimetype || 'image/jpeg' };
-    case 'video': return { video: buffer, caption, mimetype: mimetype || 'video/mp4' };
-    case 'document': return { document: buffer, fileName: filename || 'document', caption, mimetype: mimetype || 'application/octet-stream' };
-    case 'audio': return { audio: buffer, mimetype: mimetype || 'audio/mpeg', ptt: false };
-    case 'sticker': return { sticker: buffer, mimetype: mimetype || 'image/webp' };
-    default: throw new Error(`Invalid media type: ${type}`);
-  }
-}
 
 /**
  * Helper: Verify session
@@ -134,7 +83,7 @@ export async function sendToGroupHandler(
 ): Promise<void> {
   try {
     const { sessionId } = request.params;
-    const { groupId, message, media } = request.body;
+    const { groupId, message, media, replyTo } = request.body;
     const user = request.user!;
 
     if (!groupId) {
@@ -157,15 +106,25 @@ export async function sendToGroupHandler(
     const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
     const results: Array<{ type: string; messageId?: string }> = [];
 
+    // Build quoted message if replyTo is provided
+    const quoted = replyTo ? {
+      key: { remoteJid: jid, id: replyTo, fromMe: false },
+      message: { conversation: '' },
+    } : undefined;
+
     if (message) {
-      const textResult = await socket.sendMessage(jid, { text: message });
+      const textContent: Record<string, unknown> = { text: message };
+      if (quoted) textContent.quoted = quoted;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const textResult = await socket.sendMessage(jid, textContent as any);
       results.push({ type: 'text', messageId: textResult?.key?.id ?? undefined });
     }
 
     if (media && media.length > 0) {
       for (const item of media) {
         const { buffer, mimetype } = await prepareMediaBuffer(item.data);
-        const content = buildMediaContent(item.type, buffer, item.mimetype || mimetype, item.caption, item.filename);
+        const content = buildMediaContent(item.type, buffer, item.mimetype || mimetype, item.caption, item.filename, item.isAnimated);
+        if (quoted) (content as Record<string, unknown>).quoted = quoted;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mediaResult = await socket.sendMessage(jid, content as any);
         results.push({ type: item.type, messageId: mediaResult?.key?.id ?? undefined });
@@ -220,7 +179,7 @@ export async function broadcastHandler(
     if (media && media.length > 0) {
       for (const item of media) {
         const { buffer, mimetype } = await prepareMediaBuffer(item.data);
-        const content = buildMediaContent(item.type, buffer, item.mimetype || mimetype, item.caption, item.filename);
+        const content = buildMediaContent(item.type, buffer, item.mimetype || mimetype, item.caption, item.filename, item.isAnimated);
         preparedMedia.push({ type: item.type, content });
       }
     }
@@ -512,7 +471,7 @@ export async function updateWebhookHandler(
 ): Promise<void> {
   try {
     const { sessionId } = request.params;
-    const { webhook_url } = request.body;
+    const { webhook_url, webhook_secret } = request.body;
     const user = request.user!;
 
     const session = await Session.findOne({
@@ -525,12 +484,16 @@ export async function updateWebhookHandler(
     }
 
     session.webhook_url = webhook_url || '';
+    if (webhook_secret !== undefined) {
+      session.webhook_secret = webhook_secret || '';
+    }
     await session.save();
 
     const runtime = sessionStore.get(sessionId);
     
     if (runtime) {
-      runtime.webhookUrl = session.webhook_url // 🔥 live update
+      runtime.webhookUrl = session.webhook_url;
+      runtime.webhookSecret = session.webhook_secret || undefined;
     }
 
     reply.send({
@@ -538,10 +501,71 @@ export async function updateWebhookHandler(
       data: {
         session_id: sessionId,
         webhook_url: session.webhook_url,
+        webhook_secret: session.webhook_secret ? '****' : null,
       },
     });
   } catch (error) {
     console.error('[Controller] Update webhook error:', error);
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// MENTIONS
+// ========================================
+
+/**
+ * Send message with mentions to a group
+ * POST /session/:sessionId/groups/:groupId/mention
+ */
+export async function mentionHandler(
+  request: FastifyRequest<{ Params: GroupParams; Body: MentionBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const { message, mentioned } = request.body;
+    const user = request.user!;
+
+    if (!message) {
+      reply.status(400).send({ success: false, error: 'Missing message' });
+      return;
+    }
+
+    if (!mentioned || mentioned.length === 0) {
+      reply.status(400).send({ success: false, error: 'Missing mentioned array' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+
+    // Build mention text with @ mentions
+    const mentionText = mentioned.map((m) => `@${m.split('@')[0]}`).join(' ');
+    const fullMessage = `${mentionText} ${message}`;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const msgResult = await socket.sendMessage(jid, {
+      text: fullMessage,
+      mentions: mentioned,
+    } as any);
+
+    reply.send({
+      success: true,
+      data: {
+        groupId: jid,
+        messageId: msgResult?.key?.id ?? undefined,
+        mentioned,
+      },
+    });
+  } catch (error) {
+    console.error('[Controller] Mention error:', error);
     reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
   }
 }
@@ -556,4 +580,5 @@ export default {
   removeGroupParticipantsHandler,
   leaveGroupHandler,
   updateWebhookHandler,
+  mentionHandler,
 };

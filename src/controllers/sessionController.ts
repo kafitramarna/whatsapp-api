@@ -17,8 +17,7 @@ import {
   qrCodes,
 } from '../services/whatsappService';
 import { Session } from '../models/Session';
-import { safeFetch } from '../lib/ssrfGuard';
-import { env } from '../config/env';
+import { prepareMediaBuffer, buildMediaContent, type MediaItem } from '../lib/mediaUtils';
 
 // Request body types
 interface CreateSessionBody {
@@ -33,13 +32,8 @@ interface SessionParams {
 interface SendMessageBody {
   to: string;
   message?: string;
-  media?: Array<{
-    type: 'image' | 'video' | 'document' | 'audio' | 'sticker';
-    data: string; // base64 or URL
-    caption?: string;
-    filename?: string;
-    mimetype?: string;
-  }>;
+  replyTo?: string;
+  media?: MediaItem[];
 }
 
 interface MarkReadBody {
@@ -52,78 +46,6 @@ interface PresenceBody {
   presence: 'composing' | 'paused';
 }
 
-/**
- * Helper: Prepare media buffer from URL, file path, or base64
- */
-async function prepareMediaBuffer(mediaData: string): Promise<{ buffer: Buffer; mimetype?: string }> {
-  // HTTP/HTTPS URL — with SSRF protection
-  if (mediaData.startsWith('http://') || mediaData.startsWith('https://')) {
-    const response = await safeFetch(mediaData);
-    const arrayBuffer = await response.arrayBuffer();
-    const contentType = response.headers.get('content-type');
-    return { buffer: Buffer.from(arrayBuffer), mimetype: contentType || undefined };
-  }
-  
-  // Local file path (file:// protocol or absolute path) — blocked in production
-  if (mediaData.startsWith('file://') || mediaData.match(/^[a-zA-Z]:[/\\]/) || mediaData.startsWith('/')) {
-    if (env.isProd) {
-      throw new Error('Local file paths are not allowed in production. Use base64 or URL instead.');
-    }
-    const { readFile } = await import('fs/promises');
-    const { fileURLToPath } = await import('url');
-    
-    let filePath = mediaData;
-    
-    // Convert file:// URL to path
-    if (mediaData.startsWith('file://')) {
-      filePath = fileURLToPath(mediaData);
-    }
-    
-    const buffer = await readFile(filePath);
-    
-    // Detect mimetype from extension
-    const ext = filePath.split('.').pop()?.toLowerCase();
-    const mimeMap: Record<string, string> = {
-      'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif', 'webp': 'image/webp',
-      'mp4': 'video/mp4', '3gp': 'video/3gpp', 'mov': 'video/quicktime',
-      'pdf': 'application/pdf', 'doc': 'application/msword', 'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'xls': 'application/vnd.ms-excel', 'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'mp3': 'audio/mpeg', 'ogg': 'audio/ogg', 'wav': 'audio/wav',
-    };
-    
-    return { buffer, mimetype: ext ? mimeMap[ext] : undefined };
-  }
-  
-  // Assume base64
-  const base64Data = mediaData.includes(',') ? mediaData.split(',')[1] : mediaData;
-  return { buffer: Buffer.from(base64Data, 'base64') };
-}
-
-/**
- * Helper: Build message content for media
- */
-function buildMediaContent(
-  type: string,
-  buffer: Buffer,
-  mimetype?: string,
-  caption?: string,
-  filename?: string
-): Record<string, unknown> {
-  switch (type) {
-    case 'image':
-      return { image: buffer, caption, mimetype: mimetype || 'image/jpeg' };
-    case 'video':
-      return { video: buffer, caption, mimetype: mimetype || 'video/mp4' };
-    case 'document':
-      return { document: buffer, fileName: filename || 'document', caption, mimetype: mimetype || 'application/octet-stream' };
-    case 'audio':
-      return { audio: buffer, mimetype: mimetype || 'audio/mpeg', ptt: false };
-    case 'sticker':
-      return { sticker: buffer, mimetype: mimetype || 'image/webp' };
-    default:
-      throw new Error(`Invalid media type: ${type}`);
-  }
-}
 
 /**
  * Create a new WhatsApp session
@@ -397,7 +319,7 @@ export async function sendMessageHandler(
 ): Promise<void> {
   try {
     const { sessionId } = request.params;
-    const { to, message, media } = request.body;
+    const { to, message, media, replyTo } = request.body;
     const user = request.user!;
 
     // Validate input - need at least message or media
@@ -446,9 +368,18 @@ export async function sendMessageHandler(
 
     const results: Array<{ type: string; messageId?: string }> = [];
 
+    // Build quoted message if replyTo is provided
+    const quoted = replyTo ? {
+      key: { remoteJid: jid, id: replyTo, fromMe: false },
+      message: { conversation: '' },
+    } : undefined;
+
     // Send text message if provided
     if (message) {
-      const textResult = await socket.sendMessage(jid, { text: message });
+      const textContent: Record<string, unknown> = { text: message };
+      if (quoted) textContent.quoted = quoted;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const textResult = await socket.sendMessage(jid, textContent as any);
       results.push({ type: 'text', messageId: textResult?.key?.id ?? undefined });
     }
 
@@ -461,8 +392,10 @@ export async function sendMessageHandler(
           buffer,
           item.mimetype || detectedMimetype,
           item.caption,
-          item.filename
+          item.filename,
+          item.isAnimated
         );
+        if (quoted) (content as Record<string, unknown>).quoted = quoted;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mediaResult = await socket.sendMessage(jid, content as any);
         results.push({ type: item.type, messageId: mediaResult?.key?.id ?? undefined });
