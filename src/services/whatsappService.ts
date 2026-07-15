@@ -23,6 +23,7 @@ import QRCode from 'qrcode';
 import pino from 'pino';
 import { sessionStore } from './sessionStore';
 import { validateUrl } from '../lib/ssrfGuard';
+import crypto from 'crypto';
 
 // Logger for Baileys (set to silent in production)
 const logger = pino({ level: env.isDev ? 'debug' : 'silent' });
@@ -189,7 +190,8 @@ export async function createSession(
     });
 
     sessionStore.set(sessionId, {
-      webhookUrl: session.webhook_url
+      webhookUrl: session.webhook_url,
+      webhookSecret: session.webhook_secret,
     });
 
     // If session existed but we are restarting it, update webhook if provided
@@ -273,7 +275,7 @@ export async function createSession(
               type: m.type,
               messages,
             },
-          });
+          }, runtime?.webhookSecret);
         }
       } catch (error) {
         console.error(`[WA] Error in messages.upsert handler for ${sessionId}:`, error);
@@ -300,7 +302,7 @@ export async function createSession(
             sessionId,
             timestamp: new Date().toISOString(),
             data: statusUpdates,
-          });
+          }, runtime?.webhookSecret);
         }
       } catch (error) {
         console.error(`[WA] Error in messages.update handler for ${sessionId}:`, error);
@@ -319,7 +321,7 @@ export async function createSession(
             sessionId,
             timestamp: new Date().toISOString(),
             data: presence,
-          });
+          }, runtime?.webhookSecret);
         }
       } catch (error) {
         console.error(`[WA] Error in presence.update handler for ${sessionId}:`, error);
@@ -533,15 +535,28 @@ export async function restoreAllSessions(): Promise<void> {
 }
 
 /**
- * Send webhook notification
+ * Send webhook notification with HMAC signing
  */
-async function sendWebhook(url: string, data: unknown): Promise<void> {
+async function sendWebhook(url: string, data: unknown, webhookSecret?: string): Promise<void> {
   try {
     await validateUrl(url);
+    const body = JSON.stringify(data);
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+    if (webhookSecret) {
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const signature = crypto
+        .createHmac('sha256', webhookSecret)
+        .update(`${timestamp}.${body}`)
+        .digest('hex');
+      headers['X-Webhook-Signature'] = `sha256=${signature}`;
+      headers['X-Webhook-Timestamp'] = timestamp;
+    }
+
     await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      headers,
+      body,
     });
   } catch (error) {
     console.error('[WA] Webhook error:', error);

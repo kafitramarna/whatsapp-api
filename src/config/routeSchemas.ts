@@ -238,6 +238,7 @@ export const SessionSchemas = {
       required: ['webhook_url'],
       properties: {
         webhook_url: { type: 'string' as const, format: 'uri', nullable: true },
+        webhook_secret: { type: 'string' as const, description: 'HMAC secret for webhook signing', nullable: true },
       },
     },
   },
@@ -262,6 +263,7 @@ export const MessagingSchemas = {
       properties: {
         to: { type: 'string' as const, description: 'Phone number (e.g., 6281234567890)' },
         message: { type: 'string' as const, description: 'Text message' },
+        replyTo: { type: 'string' as const, description: 'Message ID to reply to' },
         media: {
           type: 'array' as const,
           description: 'Array of media items',
@@ -273,6 +275,7 @@ export const MessagingSchemas = {
               caption: { type: 'string' as const },
               filename: { type: 'string' as const },
               mimetype: { type: 'string' as const },
+              isAnimated: { type: 'boolean' as const, description: 'For stickers — whether animated' },
             },
           },
         },
@@ -328,6 +331,7 @@ export const MessagingSchemas = {
       properties: {
         groupId: { type: 'string' as const, description: 'Group JID (e.g., 120363xxx@g.us)' },
         message: { type: 'string' as const },
+        replyTo: { type: 'string' as const, description: 'Message ID to reply to' },
         media: { type: 'array' as const },
       },
     },
@@ -458,6 +462,28 @@ export const GroupSchemas = {
     tags: ['Groups'],
     summary: 'Leave group',
     security: [{ ApiKeyAuth: [] }],
+  },
+  mention: {
+    tags: ['Groups'],
+    summary: 'Mention users in group',
+    description: 'Send a message mentioning specific users in a group',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['message', 'mentioned'],
+      properties: {
+        message: { type: 'string' as const, description: 'Message text' },
+        mentioned: {
+          type: 'array' as const,
+          items: { type: 'string' as const },
+          description: 'Array of JIDs to mention (e.g., 6281234567890@s.whatsapp.net)',
+        },
+      },
+      example: {
+        message: 'Hello everyone!',
+        mentioned: ['6281234567890@s.whatsapp.net', '6289876543210@s.whatsapp.net'],
+      },
+    },
   },
 };
 

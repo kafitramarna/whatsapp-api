@@ -74,6 +74,13 @@ export class Session extends Model {
   declare webhook_url: string;
 
   @Column({
+    type: DataType.STRING(255),
+    allowNull: true,
+    comment: 'HMAC secret for webhook payload signing',
+  })
+  declare webhook_secret: string;
+
+  @Column({
     type: DataType.STRING(20),
     allowNull: true,
     comment: 'WhatsApp phone number when connected',
