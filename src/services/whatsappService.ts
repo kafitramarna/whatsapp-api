@@ -22,8 +22,7 @@ import { env } from '../config/env';
 import QRCode from 'qrcode';
 import pino from 'pino';
 import { sessionStore } from './sessionStore';
-import { validateUrl } from '../lib/ssrfGuard';
-import crypto from 'crypto';
+import { deliverWebhook, startRetryProcessor, stopRetryProcessor } from './webhookService';
 
 // Logger for Baileys (set to silent in production)
 const logger = pino({ level: env.isDev ? 'debug' : 'silent' });
@@ -191,7 +190,8 @@ export async function createSession(
 
     sessionStore.set(sessionId, {
       webhookUrl: session.webhook_url,
-      webhookSecret: session.webhook_secret,
+      webhookSecret: session.webhook_secret || undefined,
+      webhookEvents: session.webhook_events ? (() => { try { return JSON.parse(session.webhook_events); } catch { return []; } })() : [],
     });
 
     // If session existed but we are restarting it, update webhook if provided
@@ -267,15 +267,10 @@ export async function createSession(
 
         // Send webhook if configured
         if (runtime?.webhookUrl) {
-          await sendWebhook(runtime?.webhookUrl, {
-            event: 'message.received',
-            sessionId,
-            timestamp: new Date().toISOString(),
-            data: {
-              type: m.type,
-              messages,
-            },
-          }, runtime?.webhookSecret);
+          await deliverWebhook(sessionId, 'message.received', {
+            type: m.type,
+            messages,
+          });
         }
       } catch (error) {
         console.error(`[WA] Error in messages.upsert handler for ${sessionId}:`, error);
@@ -297,12 +292,7 @@ export async function createSession(
 
         // Send webhook if configured
         if (runtime?.webhookUrl) {
-          await sendWebhook(runtime?.webhookUrl, {
-            event: 'message.status',
-            sessionId,
-            timestamp: new Date().toISOString(),
-            data: statusUpdates,
-          }, runtime?.webhookSecret);
+          await deliverWebhook(sessionId, 'message.status', statusUpdates);
         }
       } catch (error) {
         console.error(`[WA] Error in messages.update handler for ${sessionId}:`, error);
@@ -316,17 +306,108 @@ export async function createSession(
 
         // Send webhook if configured
         if (runtime?.webhookUrl) {
-          await sendWebhook(runtime?.webhookUrl, {
-            event: 'presence.update',
-            sessionId,
-            timestamp: new Date().toISOString(),
-            data: presence,
-          }, runtime?.webhookSecret);
+          await deliverWebhook(sessionId, 'presence.update', presence);
         }
       } catch (error) {
         console.error(`[WA] Error in presence.update handler for ${sessionId}:`, error);
       }
     });
+
+    // Handle message reactions
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    socket.ev.on('messages.reaction', async (reactions: any[]) => {
+      try {
+        const runtime = sessionStore.get(sessionId);
+        if (runtime?.webhookUrl) {
+          const formatted = reactions.map((r) => ({
+            messageId: r.key?.id,
+            reaction: r.reaction?.text || null,
+            senderJid: r.key?.remoteJid,
+            timestamp: r.reaction?.timestamp,
+          }));
+          await deliverWebhook(sessionId, 'message.reaction', formatted);
+        }
+      } catch (error) {
+        console.error(`[WA] Error in messages.reaction handler for ${sessionId}:`, error);
+      }
+    });
+
+    // Handle message deletions
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    socket.ev.on('messages.delete', async (deletion: any) => {
+      try {
+        const runtime = sessionStore.get(sessionId);
+        if (runtime?.webhookUrl) {
+          const payload = deletion.messages
+            ? { messages: deletion.messages.map((m: { key: { id: string; remoteJid: string } }) => ({ id: m.key?.id, remoteJid: m.key?.remoteJid })), deleteType: 'delete' }
+            : { keys: deletion.keys?.map((k: { id: string; remoteJid: string }) => ({ id: k.id, remoteJid: k.remoteJid })), deleteType: 'revoke' };
+          await deliverWebhook(sessionId, 'message.deleted', payload);
+        }
+      } catch (error) {
+        console.error(`[WA] Error in messages.delete handler for ${sessionId}:`, error);
+      }
+    });
+
+    // Handle group metadata updates
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    socket.ev.on('groups.update', async (updates: any[]) => {
+      try {
+        const runtime = sessionStore.get(sessionId);
+        if (runtime?.webhookUrl) {
+          const formatted = updates.map((u) => ({
+            groupId: u.id,
+            subject: u.subject,
+            desc: u.desc,
+            owner: u.owner,
+            restrict: u.restrict,
+            announce: u.announce,
+          }));
+          await deliverWebhook(sessionId, 'group.update', formatted);
+        }
+      } catch (error) {
+        console.error(`[WA] Error in groups.update handler for ${sessionId}:`, error);
+      }
+    });
+
+    // Handle group participant changes
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    socket.ev.on('group-participants.update', async (update: any) => {
+      try {
+        const runtime = sessionStore.get(sessionId);
+        if (runtime?.webhookUrl) {
+          await deliverWebhook(sessionId, 'group.participants', {
+            groupId: update.id,
+            action: update.action,
+            participants: update.participants,
+          });
+        }
+      } catch (error) {
+        console.error(`[WA] Error in group-participants.update handler for ${sessionId}:`, error);
+      }
+    });
+
+    // Handle incoming calls
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    socket.ev.on('call', async (calls: any[]) => {
+      try {
+        const runtime = sessionStore.get(sessionId);
+        if (runtime?.webhookUrl) {
+          const formatted = calls.map((c) => ({
+            id: c.id,
+            from: c.from,
+            status: c.status,
+            isVideo: c.isVideo,
+            isGroup: c.isGroup,
+          }));
+          await deliverWebhook(sessionId, 'call', formatted);
+        }
+      } catch (error) {
+        console.error(`[WA] Error in call handler for ${sessionId}:`, error);
+      }
+    });
+
+    // Start webhook retry processor
+    startRetryProcessor();
 
     return {
       success: true,
@@ -534,40 +615,13 @@ export async function restoreAllSessions(): Promise<void> {
   }
 }
 
-/**
- * Send webhook notification with HMAC signing
- */
-async function sendWebhook(url: string, data: unknown, webhookSecret?: string): Promise<void> {
-  try {
-    await validateUrl(url);
-    const body = JSON.stringify(data);
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-
-    if (webhookSecret) {
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const signature = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(`${timestamp}.${body}`)
-        .digest('hex');
-      headers['X-Webhook-Signature'] = `sha256=${signature}`;
-      headers['X-Webhook-Timestamp'] = timestamp;
-    }
-
-    await fetch(url, {
-      method: 'POST',
-      headers,
-      body,
-    });
-  } catch (error) {
-    console.error('[WA] Webhook error:', error);
-  }
-}
 
 /**
  * Gracefully close all sessions
  */
 export async function closeAllSessions(): Promise<void> {
   console.log(`[WA] Closing ${sessions.size} sessions...`);
+  stopRetryProcessor();
   
   for (const [sessionId, socket] of sessions) {
     try {
