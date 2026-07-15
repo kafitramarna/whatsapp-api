@@ -132,7 +132,7 @@ export class ScheduledMessage extends Model {
   }
 
   // Helper methods
-  getMediaItems(): Array<{ type: string; data: string; caption?: string; filename?: string; mimetype?: string }> {
+  getMediaItems(): Array<{ type: string; data: string; caption?: string; filename?: string; mimetype?: string; isAnimated?: boolean }> {
     if (!this.media) return [];
     try {
       return JSON.parse(this.media);
@@ -141,7 +141,7 @@ export class ScheduledMessage extends Model {
     }
   }
 
-  setMediaItems(items: Array<{ type: string; data: string; caption?: string; filename?: string; mimetype?: string }>): void {
+  setMediaItems(items: Array<{ type: string; data: string; caption?: string; filename?: string; mimetype?: string; isAnimated?: boolean }>): void {
     this.media = JSON.stringify(items);
   }
 }
