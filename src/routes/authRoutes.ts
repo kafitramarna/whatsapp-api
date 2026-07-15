@@ -7,6 +7,9 @@
 import { FastifyInstance, FastifyPluginOptions, FastifyRequest, FastifyReply } from 'fastify';
 import { User } from '../models/User';
 import { AuthSchemas } from '../config/routeSchemas';
+import { env } from '../config/env';
+import { apiKeyAuth } from '../middleware/apiKeyAuth';
+import { adminOnly } from '../middleware/adminOnly';
 
 // Request body types
 interface RegisterBody {
@@ -244,8 +247,16 @@ export async function authRoutes(
   fastify: FastifyInstance,
   _options: FastifyPluginOptions
 ): Promise<void> {
-  // Register new user
-  fastify.post('/auth/register', { schema: AuthSchemas.register }, registerHandler);
+  // Register new user — public if PUBLIC_REGISTRATION=true, otherwise admin-only
+  if (env.publicRegistration) {
+    fastify.post('/auth/register', { schema: AuthSchemas.register }, registerHandler);
+  } else {
+    fastify.post('/auth/register', {
+      schema: AuthSchemas.register,
+      preHandler: [apiKeyAuth, adminOnly],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }, registerHandler as any);
+  }
 
   // Login
   fastify.post('/auth/login', { schema: AuthSchemas.login }, loginHandler);

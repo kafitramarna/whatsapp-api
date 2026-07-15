@@ -36,6 +36,7 @@ const app: FastifyInstance = Fastify({
         }
       : undefined,
   },
+  bodyLimit: 10 * 1024 * 1024, // 10MB max request body
   ajv: {
     customOptions: {
       removeAdditional: true,
@@ -65,10 +66,11 @@ async function registerPlugins(): Promise<void> {
     },
   });
 
-  // Rate limiting - anti-spam protection
+  // Rate limiting - per-user anti-spam protection
   await app.register(rateLimit, {
     max: 100, // 100 requests per window
     timeWindow: '1 minute',
+    keyGenerator: (req) => req.user?.id || req.ip,
     errorResponseBuilder: () => ({
       success: false,
       error: 'Too many requests. Please slow down.',
@@ -76,9 +78,9 @@ async function registerPlugins(): Promise<void> {
     }),
   });
 
-  // CORS
+  // CORS — restricted via env, blocked in production by default
   await app.register(cors, {
-    origin: true,
+    origin: env.corsOrigins.length > 0 ? env.corsOrigins : !env.isProd,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'x-api-key'],
   });
@@ -173,7 +175,7 @@ async function seedDatabase(): Promise<void> {
   try {
     const userCount = await User.count();
 
-    if (userCount === 0) {
+    if (userCount === 0 && !env.publicRegistration) {
       const adminUser = await User.create({
         username: 'admin',
         password: 'admin123', // Will be hashed by model hook
@@ -191,6 +193,9 @@ async function seedDatabase(): Promise<void> {
       console.log('⚠️  Please change the password after first login!');
       console.log('⚠️  Save your API Key now — it will NOT be shown again!');
       console.log('='.repeat(60));
+    } else if (userCount === 0 && env.publicRegistration) {
+      console.log('[Seed] Public registration is enabled — no default admin created.');
+      console.log('[Seed] First user should register via POST /api/auth/register');
     }
   } catch (error) {
     console.error('Error seeding database:', error);
