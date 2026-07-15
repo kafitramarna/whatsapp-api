@@ -544,6 +544,114 @@ export const UserSchemas = {
   },
 };
 
+// Webhook schemas
+export const WebhookSchemas = {
+  listEndpoints: {
+    tags: ['Webhooks'],
+    summary: 'List webhook endpoints',
+    description: 'Get all webhook endpoints for a session',
+    security: [{ ApiKeyAuth: [] }],
+  },
+  createEndpoint: {
+    tags: ['Webhooks'],
+    summary: 'Create webhook endpoint',
+    description: 'Add a new webhook endpoint for a session',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['url'],
+      properties: {
+        url: { type: 'string' as const, format: 'uri', description: 'Webhook endpoint URL' },
+        secret: { type: 'string' as const, description: 'HMAC secret for signing' },
+        events: {
+          type: 'array' as const,
+          items: { type: 'string' as const },
+          description: 'Event types to receive. Empty = all events',
+          example: ['message.received', 'message.status'],
+        },
+      },
+      example: {
+        url: 'https://example.com/webhook',
+        events: ['message.received'],
+      },
+    },
+  },
+  updateEndpoint: {
+    tags: ['Webhooks'],
+    summary: 'Update webhook endpoint',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      properties: {
+        url: { type: 'string' as const, format: 'uri' },
+        secret: { type: 'string' as const },
+        events: { type: 'array' as const, items: { type: 'string' as const } },
+        is_active: { type: 'boolean' as const },
+      },
+    },
+  },
+  deleteEndpoint: {
+    tags: ['Webhooks'],
+    summary: 'Delete webhook endpoint',
+    security: [{ ApiKeyAuth: [] }],
+  },
+  test: {
+    tags: ['Webhooks'],
+    summary: 'Test webhook endpoint',
+    description: 'Send a test payload to a URL and return status + latency',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['url'],
+      properties: {
+        url: { type: 'string' as const, format: 'uri', description: 'URL to test' },
+        secret: { type: 'string' as const, description: 'Optional HMAC secret for signing test payload' },
+      },
+      example: {
+        url: 'https://example.com/webhook',
+      },
+    },
+  },
+  listLogs: {
+    tags: ['Webhooks'],
+    summary: 'List webhook delivery logs',
+    description: 'Get paginated webhook delivery logs with optional status filter',
+    security: [{ ApiKeyAuth: [] }],
+    querystring: {
+      type: 'object' as const,
+      properties: {
+        page: { type: 'integer' as const, default: 1 },
+        limit: { type: 'integer' as const, default: 20 },
+        status: { type: 'string' as const, enum: ['pending', 'success', 'failed', 'retrying'] },
+      },
+    },
+  },
+  retryLog: {
+    tags: ['Webhooks'],
+    summary: 'Retry failed webhook delivery',
+    description: 'Manually retry a failed webhook log entry',
+    security: [{ ApiKeyAuth: [] }],
+  },
+  updateEvents: {
+    tags: ['Webhooks'],
+    summary: 'Update webhook event filter',
+    description: 'Set which event types the session-level webhook should receive',
+    security: [{ ApiKeyAuth: [] }],
+    body: {
+      type: 'object' as const,
+      required: ['events'],
+      properties: {
+        events: {
+          type: 'array' as const,
+          items: { type: 'string' as const },
+          description: 'Event types to receive. Empty = all events',
+          example: ['message.received', 'message.status', 'presence.update', 'message.reaction', 'message.deleted', 'group.update', 'group.participants', 'call'],
+        },
+      },
+    },
+  },
+};
+
 export default {
   AuthSchemas,
   SessionSchemas,
@@ -551,4 +659,5 @@ export default {
   ScheduledSchemas,
   GroupSchemas,
   UserSchemas,
+  WebhookSchemas,
 };

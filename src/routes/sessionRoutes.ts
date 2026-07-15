@@ -29,6 +29,16 @@ import {
   mentionHandler,
 } from '../controllers/groupController';
 import {
+  listWebhookEndpointsHandler,
+  createWebhookEndpointHandler,
+  updateWebhookEndpointHandler,
+  deleteWebhookEndpointHandler,
+  testWebhookHandler,
+  listWebhookLogsHandler,
+  retryWebhookLogHandler,
+  updateWebhookEventsHandler,
+} from '../controllers/webhookController';
+import {
   createScheduledHandler,
   listScheduledHandler,
   getScheduledHandler,
@@ -39,7 +49,8 @@ import {
   SessionSchemas, 
   MessagingSchemas, 
   ScheduledSchemas, 
-  GroupSchemas 
+  GroupSchemas,
+  WebhookSchemas,
 } from '../config/routeSchemas';
 
 /**
@@ -132,6 +143,34 @@ export async function sessionRoutes(
 
   // Mention users in group
   fastify.post('/session/:sessionId/groups/:groupId/mention', { schema: GroupSchemas.mention }, mentionHandler);
+
+  // ========================================
+  // WEBHOOK MANAGEMENT
+  // ========================================
+
+  // List webhook endpoints
+  fastify.get('/session/:sessionId/webhooks', { schema: WebhookSchemas.listEndpoints }, listWebhookEndpointsHandler);
+
+  // Create webhook endpoint
+  fastify.post('/session/:sessionId/webhooks', { schema: WebhookSchemas.createEndpoint }, createWebhookEndpointHandler);
+
+  // Update webhook endpoint
+  fastify.put('/session/:sessionId/webhooks/:endpointId', { schema: WebhookSchemas.updateEndpoint }, updateWebhookEndpointHandler);
+
+  // Delete webhook endpoint
+  fastify.delete('/session/:sessionId/webhooks/:endpointId', { schema: WebhookSchemas.deleteEndpoint }, deleteWebhookEndpointHandler);
+
+  // Test webhook
+  fastify.post('/session/:sessionId/webhooks/test', { schema: WebhookSchemas.test }, testWebhookHandler);
+
+  // List webhook delivery logs
+  fastify.get('/session/:sessionId/webhooks/logs', { schema: WebhookSchemas.listLogs }, listWebhookLogsHandler);
+
+  // Retry failed webhook delivery
+  fastify.post('/session/:sessionId/webhooks/logs/:logId/retry', { schema: WebhookSchemas.retryLog }, retryWebhookLogHandler);
+
+  // Update session-level webhook event filter
+  fastify.put('/session/:sessionId/webhook/events', { schema: WebhookSchemas.updateEvents }, updateWebhookEventsHandler);
 }
 
 export default sessionRoutes;
