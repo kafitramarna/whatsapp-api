@@ -65,7 +65,7 @@ async function processScheduledMessages(): Promise<void> {
         const mediaItems = msg.getMediaItems();
         for (const item of mediaItems) {
           const { buffer, mimetype } = await prepareMediaBuffer(item.data);
-          const content = buildMediaContent(item.type, buffer, item.mimetype || mimetype, item.caption, item.filename, item.isAnimated);
+          const content = buildMediaContent(item.type, buffer, item.mimetype || mimetype, item.caption, item.filename, item.isAnimated, item.viewOnce, item.ptt, item.quality);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const result = await socket.sendMessage(jid, content as any);
           if (!messageId) messageId = result?.key?.id ?? undefined;

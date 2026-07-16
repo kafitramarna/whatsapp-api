@@ -6,6 +6,17 @@ jest.mock('../src/models/Session', () => ({
   Session: { findOne: jest.fn() },
 }));
 
+jest.mock('../src/services/messageStore', () => ({
+  storeMessage: jest.fn(),
+  getMessage: jest.fn(),
+  getMessages: jest.fn(),
+  clearMessages: jest.fn(),
+}));
+
+jest.mock('@whiskeysockets/baileys', () => ({
+  downloadMediaMessage: jest.fn(),
+}));
+
 import { buildVCard, formatJid, formatGroupJid } from '../src/controllers/messageController';
 
 describe('MessageController — pure function tests', () => {

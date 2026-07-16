@@ -123,7 +123,7 @@ export async function sendToGroupHandler(
     if (media && media.length > 0) {
       for (const item of media) {
         const { buffer, mimetype } = await prepareMediaBuffer(item.data);
-        const content = buildMediaContent(item.type, buffer, item.mimetype || mimetype, item.caption, item.filename, item.isAnimated);
+        const content = buildMediaContent(item.type, buffer, item.mimetype || mimetype, item.caption, item.filename, item.isAnimated, item.viewOnce, item.ptt, item.quality);
         if (quoted) (content as Record<string, unknown>).quoted = quoted;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mediaResult = await socket.sendMessage(jid, content as any);
@@ -179,7 +179,7 @@ export async function broadcastHandler(
     if (media && media.length > 0) {
       for (const item of media) {
         const { buffer, mimetype } = await prepareMediaBuffer(item.data);
-        const content = buildMediaContent(item.type, buffer, item.mimetype || mimetype, item.caption, item.filename, item.isAnimated);
+        const content = buildMediaContent(item.type, buffer, item.mimetype || mimetype, item.caption, item.filename, item.isAnimated, item.viewOnce, item.ptt, item.quality);
         preparedMedia.push({ type: item.type, content });
       }
     }
@@ -837,6 +837,279 @@ export async function revokeInviteLinkHandler(
   }
 }
 
+// ========================================
+// GROUP PICTURE
+// ========================================
+
+interface GroupPictureBody {
+  image: string;
+}
+
+/**
+ * Update group profile picture
+ * PUT /session/:sessionId/groups/:groupId/picture
+ */
+export async function updateGroupPictureHandler(
+  request: FastifyRequest<{ Params: GroupParams; Body: GroupPictureBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const { image } = request.body;
+    const user = request.user!;
+
+    if (!image) {
+      reply.status(400).send({ success: false, error: 'Missing image (base64 or URL)' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+    const { buffer } = await prepareMediaBuffer(image);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await socket.updateProfilePicture(jid, { url: buffer } as any);
+
+    reply.send({ success: true, message: 'Group picture updated' });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+/**
+ * Remove group profile picture
+ * DELETE /session/:sessionId/groups/:groupId/picture
+ */
+export async function removeGroupPictureHandler(
+  request: FastifyRequest<{ Params: GroupParams }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const user = request.user!;
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+    await socket.removeProfilePicture(jid);
+
+    reply.send({ success: true, message: 'Group picture removed' });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// GROUP EPHEMERAL
+// ========================================
+
+interface GroupEphemeralBody {
+  duration: number;
+}
+
+/**
+ * Set group ephemeral/disappearing messages
+ * PUT /session/:sessionId/groups/:groupId/ephemeral
+ */
+export async function updateGroupEphemeralHandler(
+  request: FastifyRequest<{ Params: GroupParams; Body: GroupEphemeralBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const { duration } = request.body;
+    const user = request.user!;
+
+    if (duration === undefined || duration < 0) {
+      reply.status(400).send({ success: false, error: 'Missing or invalid duration (0=off, 86400=24h, 604800=7d)' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+    await socket.groupToggleEphemeral(jid, duration);
+
+    reply.send({ success: true, data: { groupId: jid, duration } });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// GROUP ADD MODE & JOIN APPROVAL
+// ========================================
+
+interface GroupAddModeBody {
+  mode: 'admin_add' | 'all_member_add';
+}
+
+/**
+ * Set group member add mode
+ * PUT /session/:sessionId/groups/:groupId/add-mode
+ */
+export async function updateGroupAddModeHandler(
+  request: FastifyRequest<{ Params: GroupParams; Body: GroupAddModeBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const { mode } = request.body;
+    const user = request.user!;
+
+    if (!mode || !['admin_add', 'all_member_add'].includes(mode)) {
+      reply.status(400).send({ success: false, error: 'mode must be "admin_add" or "all_member_add"' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+    await socket.groupMemberAddMode(jid, mode);
+
+    reply.send({ success: true, data: { groupId: jid, addMode: mode } });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+interface GroupJoinApprovalBody {
+  mode: 'on' | 'off';
+}
+
+/**
+ * Set group join approval mode
+ * PUT /session/:sessionId/groups/:groupId/join-approval
+ */
+export async function updateGroupJoinApprovalHandler(
+  request: FastifyRequest<{ Params: GroupParams; Body: GroupJoinApprovalBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const { mode } = request.body;
+    const user = request.user!;
+
+    if (!mode || !['on', 'off'].includes(mode)) {
+      reply.status(400).send({ success: false, error: 'mode must be "on" or "off"' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+    await socket.groupJoinApprovalMode(jid, mode);
+
+    reply.send({ success: true, data: { groupId: jid, joinApproval: mode } });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// GROUP JOIN REQUESTS
+// ========================================
+
+/**
+ * List pending group join requests
+ * GET /session/:sessionId/groups/:groupId/requests
+ */
+export async function listGroupRequestsHandler(
+  request: FastifyRequest<{ Params: GroupParams }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const user = request.user!;
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+    const requests = await socket.groupRequestParticipantsList(jid);
+
+    reply.send({ success: true, data: { groupId: jid, requests } });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+interface HandleGroupRequestBody {
+  participants: string[];
+  action: 'approve' | 'reject';
+}
+
+/**
+ * Approve or reject group join requests
+ * POST /session/:sessionId/groups/:groupId/requests
+ */
+export async function handleGroupRequestHandler(
+  request: FastifyRequest<{ Params: GroupParams; Body: HandleGroupRequestBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, groupId } = request.params;
+    const { participants, action } = request.body;
+    const user = request.user!;
+
+    if (!participants || participants.length === 0) {
+      reply.status(400).send({ success: false, error: 'Participants required' });
+      return;
+    }
+
+    if (!action || !['approve', 'reject'].includes(action)) {
+      reply.status(400).send({ success: false, error: 'action must be "approve" or "reject"' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = groupId.includes('@') ? groupId : `${groupId}@g.us`;
+    const jids = participants.map((p) => p.includes('@') ? p : `${p.replace(/[^0-9]/g, '')}@s.whatsapp.net`);
+
+    const updateResult = await socket.groupRequestParticipantsUpdate(jid, jids, action);
+
+    reply.send({ success: true, data: { groupId: jid, action, result: updateResult } });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
 export default {
   sendToGroupHandler,
   broadcastHandler,
@@ -855,4 +1128,11 @@ export default {
   updateGroupDescriptionHandler,
   getInviteLinkHandler,
   revokeInviteLinkHandler,
+  updateGroupPictureHandler,
+  removeGroupPictureHandler,
+  updateGroupEphemeralHandler,
+  updateGroupAddModeHandler,
+  updateGroupJoinApprovalHandler,
+  listGroupRequestsHandler,
+  handleGroupRequestHandler,
 };

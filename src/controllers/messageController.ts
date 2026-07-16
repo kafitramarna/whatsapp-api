@@ -8,6 +8,8 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { getSession } from '../services/whatsappService';
 import { Session } from '../models/Session';
+import { getMessage } from '../services/messageStore';
+import { downloadMediaMessage } from '@whiskeysockets/baileys';
 
 interface SessionParams {
   sessionId: string;
@@ -466,6 +468,403 @@ export async function getInviteInfoHandler(
   }
 }
 
+// ========================================
+// MEDIA DOWNLOAD
+// ========================================
+
+interface DownloadMediaBody {
+  messageId: string;
+  jid: string;
+}
+
+/**
+ * Download media from an incoming message
+ * POST /session/:sessionId/media/download
+ */
+export async function downloadMediaHandler(
+  request: FastifyRequest<{ Params: SessionParams; Body: DownloadMediaBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId } = request.params;
+    const { messageId, jid } = request.body;
+    const user = request.user!;
+
+    if (!messageId || !jid) {
+      reply.status(400).send({ success: false, error: 'Missing messageId or jid' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    // socket not needed — downloadMediaMessage uses the stored message directly
+    const stored = getMessage(sessionId, messageId);
+
+    if (!stored) {
+      reply.status(404).send({ success: false, error: 'Message not found in store' });
+      return;
+    }
+
+    if (!stored.message) {
+      reply.status(400).send({ success: false, error: 'Message has no media content' });
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buffer = await downloadMediaMessage(stored as any, 'buffer', {});
+
+    // Determine mimetype from message content
+    let mimetype = 'application/octet-stream';
+    if (stored.message?.imageMessage?.mimetype) mimetype = stored.message.imageMessage.mimetype;
+    else if (stored.message?.videoMessage?.mimetype) mimetype = stored.message.videoMessage.mimetype;
+    else if (stored.message?.audioMessage?.mimetype) mimetype = stored.message.audioMessage.mimetype;
+    else if (stored.message?.documentMessage?.mimetype) mimetype = stored.message.documentMessage.mimetype;
+    else if (stored.message?.stickerMessage?.mimetype) mimetype = stored.message.stickerMessage.mimetype;
+
+    reply.send({
+      success: true,
+      data: {
+        messageId,
+        mimetype,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        base64: (buffer as any).toString('base64'),
+        size: (buffer as Uint8Array).length,
+      },
+    });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// FORWARD MESSAGE
+// ========================================
+
+interface ForwardBody {
+  to: string;
+  messageId: string;
+  fromJid: string;
+}
+
+/**
+ * Forward a message to another chat
+ * POST /session/:sessionId/forward
+ */
+export async function forwardHandler(
+  request: FastifyRequest<{ Params: SessionParams; Body: ForwardBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId } = request.params;
+    const { to, messageId, fromJid } = request.body;
+    const user = request.user!;
+
+    if (!to || !messageId || !fromJid) {
+      reply.status(400).send({ success: false, error: 'Missing to, messageId, or fromJid' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const stored = getMessage(sessionId, messageId);
+
+    if (!stored) {
+      reply.status(404).send({ success: false, error: 'Message not found in store' });
+      return;
+    }
+
+    const targetJid = formatJid(to);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const msgResult = await socket.sendMessage(targetJid, {
+      forward: {
+        key: stored.key,
+        message: stored.message,
+      },
+    } as any);
+
+    reply.send({
+      success: true,
+      data: { to: targetJid, forwardedMessageId: msgResult?.key?.id ?? undefined },
+    });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// EDIT MESSAGE
+// ========================================
+
+interface EditMessageBody {
+  to: string;
+  messageId: string;
+  text: string;
+}
+
+/**
+ * Edit a sent message
+ * PUT /session/:sessionId/message
+ */
+export async function editMessageHandler(
+  request: FastifyRequest<{ Params: SessionParams; Body: EditMessageBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId } = request.params;
+    const { to, messageId, text } = request.body;
+    const user = request.user!;
+
+    if (!to || !messageId || !text) {
+      reply.status(400).send({ success: false, error: 'Missing to, messageId, or text' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const jid = formatJid(to);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const msgResult = await socket.sendMessage(jid, {
+      text,
+      edit: { remoteJid: jid, id: messageId, fromMe: true },
+    } as any);
+
+    reply.send({
+      success: true,
+      data: { to: jid, messageId, editedMessageId: msgResult?.key?.id ?? undefined },
+    });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// PIN MESSAGE
+// ========================================
+
+interface PinMessageBody {
+  jid: string;
+  pin: boolean;
+}
+
+/**
+ * Pin or unpin a chat
+ * POST /session/:sessionId/message/pin
+ */
+export async function pinMessageHandler(
+  request: FastifyRequest<{ Params: SessionParams; Body: PinMessageBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId } = request.params;
+    const { jid, pin } = request.body;
+    const user = request.user!;
+
+    if (!jid) {
+      reply.status(400).send({ success: false, error: 'Missing jid' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const targetJid = formatJid(jid);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await socket.chatModify({ pin } as any, targetJid);
+
+    reply.send({ success: true, data: { jid: targetJid, pinned: pin } });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// STAR MESSAGE
+// ========================================
+
+interface StarMessageBody {
+  jid: string;
+  messageId: string;
+  star: boolean;
+}
+
+/**
+ * Star or unstar a message
+ * POST /session/:sessionId/message/star
+ */
+export async function starMessageHandler(
+  request: FastifyRequest<{ Params: SessionParams; Body: StarMessageBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId } = request.params;
+    const { jid, messageId, star } = request.body;
+    const user = request.user!;
+
+    if (!jid || !messageId) {
+      reply.status(400).send({ success: false, error: 'Missing jid or messageId' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const targetJid = formatJid(jid);
+
+    await socket.star(targetJid, [{ id: messageId, fromMe: true }], star);
+
+    reply.send({ success: true, data: { jid: targetJid, messageId, starred: star } });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// DISAPPEARING MESSAGES
+// ========================================
+
+interface DisappearingBody {
+  duration: number;
+}
+
+/**
+ * Set disappearing messages in a chat
+ * PUT /session/:sessionId/chat/:jid/disappearing
+ */
+export async function updateDisappearingHandler(
+  request: FastifyRequest<{ Params: SessionParams & { jid: string }; Body: DisappearingBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, jid } = request.params;
+    const { duration } = request.body;
+    const user = request.user!;
+
+    if (duration === undefined || duration < 0) {
+      reply.status(400).send({ success: false, error: 'Missing or invalid duration (0=off, 86400=24h, 604800=7d)' });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const targetJid = formatJid(jid);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await socket.chatModify({ ephemeralExpiration: duration } as any, targetJid);
+
+    reply.send({ success: true, data: { jid: targetJid, duration } });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+// ========================================
+// CHAT OPERATIONS
+// ========================================
+
+interface ChatModifyBody {
+  action: 'archive' | 'unarchive' | 'mute' | 'unmute' | 'pin' | 'unpin' | 'clear' | 'delete' | 'markRead';
+  duration?: number;
+}
+
+/**
+ * Modify chat state (archive, mute, pin, clear, delete, markRead)
+ * PUT /session/:sessionId/chat/:jid/modify
+ */
+export async function chatModifyHandler(
+  request: FastifyRequest<{ Params: SessionParams & { jid: string }; Body: ChatModifyBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { sessionId, jid } = request.params;
+    const { action, duration } = request.body;
+    const user = request.user!;
+
+    const validActions = ['archive', 'unarchive', 'mute', 'unmute', 'pin', 'unpin', 'clear', 'delete', 'markRead'];
+    if (!action || !validActions.includes(action)) {
+      reply.status(400).send({ success: false, error: `action must be one of: ${validActions.join(', ')}` });
+      return;
+    }
+
+    const result = await verifySession(sessionId, user.id);
+    if ('error' in result) {
+      reply.status(400).send({ success: false, error: result.error });
+      return;
+    }
+
+    const { socket } = result;
+    const targetJid = formatJid(jid);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let mod: any;
+    switch (action) {
+      case 'archive':
+        mod = { archive: true, lastMessages: [] };
+        break;
+      case 'unarchive':
+        mod = { archive: false, lastMessages: [] };
+        break;
+      case 'mute':
+        mod = { mute: duration ?? 86400 };
+        break;
+      case 'unmute':
+        mod = { mute: null };
+        break;
+      case 'pin':
+        mod = { pin: true };
+        break;
+      case 'unpin':
+        mod = { pin: false };
+        break;
+      case 'clear':
+        mod = { clear: true, lastMessages: [] };
+        break;
+      case 'delete':
+        mod = { delete: true, lastMessages: [] };
+        break;
+      case 'markRead':
+        mod = { markRead: true, lastMessages: [] };
+        break;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await socket.chatModify(mod as any, targetJid);
+
+    reply.send({ success: true, data: { jid: targetJid, action } });
+  } catch (error) {
+    reply.status(500).send({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
 export default {
   reactHandler,
   sendPollHandler,
@@ -475,6 +874,13 @@ export default {
   checkNumberHandler,
   acceptInviteHandler,
   getInviteInfoHandler,
+  downloadMediaHandler,
+  forwardHandler,
+  editMessageHandler,
+  pinMessageHandler,
+  starMessageHandler,
+  updateDisappearingHandler,
+  chatModifyHandler,
 };
 
 export { buildVCard, formatJid, formatGroupJid };

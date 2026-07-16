@@ -23,6 +23,9 @@ export interface MediaItem {
   filename?: string;
   mimetype?: string;
   isAnimated?: boolean;
+  viewOnce?: boolean;
+  ptt?: boolean;
+  quality?: 'standard' | 'hd';
 }
 
 export interface PreparedMedia {
@@ -75,17 +78,26 @@ export function buildMediaContent(
   mimetype?: string,
   caption?: string,
   filename?: string,
-  isAnimated?: boolean
+  isAnimated?: boolean,
+  viewOnce?: boolean,
+  ptt?: boolean,
+  quality?: 'standard' | 'hd'
 ): Record<string, unknown> {
   switch (type) {
     case 'image':
-      return { image: buffer, caption, mimetype: mimetype || 'image/jpeg' };
+      return {
+        image: buffer,
+        caption,
+        mimetype: mimetype || 'image/jpeg',
+        viewOnce: viewOnce || false,
+        ...(quality === 'hd' ? { jpegQuality: 100 } : {}),
+      };
     case 'video':
-      return { video: buffer, caption, mimetype: mimetype || 'video/mp4' };
+      return { video: buffer, caption, mimetype: mimetype || 'video/mp4', viewOnce: viewOnce || false };
     case 'document':
       return { document: buffer, fileName: filename || 'document', caption, mimetype: mimetype || 'application/octet-stream' };
     case 'audio':
-      return { audio: buffer, mimetype: mimetype || 'audio/mpeg', ptt: false };
+      return { audio: buffer, mimetype: mimetype || 'audio/mpeg', ptt: ptt ?? false };
     case 'sticker':
       return { sticker: buffer, mimetype: mimetype || 'image/webp', isAnimated: isAnimated || false };
     default:
