@@ -56,16 +56,10 @@ export async function initDatabase(): Promise<void> {
     await sequelize.authenticate();
     console.log('✅ Database connection established successfully.');
 
-    // Sync all models (create tables if not exist)
-    // In production, use migrations instead
-    if (env.isDev) {
-      // Disabled alter to prevent ER_TOO_MANY_KEYS loop
-      await sequelize.sync({ alter: false });
-      console.log('✅ Database models synchronized.');
-    } else {
-      await sequelize.sync();
-      console.log('✅ Database models synchronized (production mode).');
-    }
+    // Schema management is handled by Sequelize CLI migrations.
+    // Run `npm run migrate` to apply pending migrations.
+    // Do NOT use sequelize.sync() — it bypasses migration version control.
+    console.log('✅ Database connected. Run `npm run migrate` to sync schema.');
   } catch (error) {
     console.error('❌ Unable to connect to the database:', error);
     throw error;
