@@ -21,7 +21,7 @@ export async function apiKeyAuth(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
-  const apiKey = request.headers['x-api-key'] as string;
+  const apiKey = (request.headers['x-api-key'] as string) || (request.query as { api_key?: string }).api_key;
 
   if (!apiKey) {
     reply.status(401).send({

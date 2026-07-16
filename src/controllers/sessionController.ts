@@ -15,13 +15,13 @@ import {
   sendPresence,
   sessions,
   qrCodes,
+  sessionEvents,
 } from '../services/whatsappService';
 import { Session } from '../models/Session';
 import { prepareMediaBuffer, buildMediaContent, type MediaItem } from '../lib/mediaUtils';
 
 // Request body types
 interface CreateSessionBody {
-  session_id?: string;
   webhook_url?: string;
 }
 
@@ -57,25 +57,10 @@ export async function createSessionHandler(
 ): Promise<void> {
   try {
     const user = request.user!;
-    const { session_id, webhook_url } = request.body || {};
+    const { webhook_url } = request.body || {};
 
-    // Generate session ID if not provided
-    const sessionId = session_id || `session_${uuidv4().slice(0, 8)}`;
-
-    // Check if session already exists for another user
-    const existingSession = await Session.findOne({
-      where: { session_id: sessionId },
-    });
-
-    if (existingSession && existingSession.user_id !== user.id) {
-      reply.status(400).send({
-        success: false,
-        error: 'Session ID already exists for another user',
-      });
-      return;
-    }
-
-    // Create session (handles creation or update of existing disconnected session)
+    // Always auto-generate session ID
+    const sessionId = `session_${uuidv4()}`;
 
     // Create session
     const result = await createSession(sessionId, user.id, webhook_url);
@@ -393,7 +378,10 @@ export async function sendMessageHandler(
           item.mimetype || detectedMimetype,
           item.caption,
           item.filename,
-          item.isAnimated
+          item.isAnimated,
+          item.viewOnce,
+          item.ptt,
+          item.quality
         );
         if (quoted) (content as Record<string, unknown>).quoted = quoted;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -485,6 +473,95 @@ export async function sendPresenceHandler(
   }
 }
 
+/**
+ * Session events stream (SSE)
+ * GET /session/:sessionId/events
+ */
+export async function sessionEventsHandler(
+  request: FastifyRequest<{ Params: SessionParams }>,
+  reply: FastifyReply
+): Promise<void> {
+  const { sessionId } = request.params;
+  const user = request.user!;
+
+  const session = await Session.findOne({
+    where: { session_id: sessionId, user_id: user.id },
+  });
+
+  if (!session) {
+    reply.status(404).send({
+      success: false,
+      error: 'Session not found',
+    });
+    return;
+  }
+
+  reply.raw.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const sendEvent = (event: string, data: unknown) => {
+    reply.raw.write(`event: ${event}\n`);
+    reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const onQrReady = (sid: string, qr: string) => {
+    if (sid === sessionId) {
+      sendEvent('qr', { session_id: sessionId, qr, status: 'qr_ready' });
+    }
+  };
+
+  const onQrCleared = (sid: string) => {
+    if (sid === sessionId) {
+      sendEvent('qr_cleared', { session_id: sessionId });
+    }
+  };
+
+  const onConnected = (sid: string, info: { phone_number?: string; name?: string }) => {
+    if (sid === sessionId) {
+      sendEvent('connected', { session_id: sessionId, ...info });
+    }
+  };
+
+  const onDisconnected = (sid: string, info: { reason: unknown; reconnecting: boolean }) => {
+    if (sid === sessionId) {
+      sendEvent('disconnected', { session_id: sessionId, ...info });
+    }
+  };
+
+  sessionEvents.on('qr:ready', onQrReady);
+  sessionEvents.on('qr:cleared', onQrCleared);
+  sessionEvents.on('connected', onConnected);
+  sessionEvents.on('disconnected', onDisconnected);
+
+  const status = await getSessionStatus(sessionId);
+  sendEvent('ready', {
+    session_id: sessionId,
+    status: status.status,
+    connected: status.connected,
+  });
+
+  const existingQr = qrCodes.get(sessionId);
+  if (existingQr) {
+    sendEvent('qr', { session_id: sessionId, qr: existingQr, status: 'qr_ready' });
+  }
+
+  const heartbeat = setInterval(() => {
+    reply.raw.write(': ping\n\n');
+  }, 15000);
+
+  request.raw.on('close', () => {
+    clearInterval(heartbeat);
+    sessionEvents.off('qr:ready', onQrReady);
+    sessionEvents.off('qr:cleared', onQrCleared);
+    sessionEvents.off('connected', onConnected);
+    sessionEvents.off('disconnected', onDisconnected);
+  });
+}
+
 export default {
   createSessionHandler,
   getSessionStatusHandler,
@@ -494,4 +571,5 @@ export default {
   sendMessageHandler,
   markReadHandler,
   sendPresenceHandler,
+  sessionEventsHandler,
 };

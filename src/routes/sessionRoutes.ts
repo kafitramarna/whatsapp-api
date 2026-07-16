@@ -15,6 +15,7 @@ import {
   sendMessageHandler,
   markReadHandler,
   sendPresenceHandler,
+  sessionEventsHandler,
 } from '../controllers/sessionController';
 import {
   sendToGroupHandler,
@@ -34,6 +35,13 @@ import {
   updateGroupDescriptionHandler,
   getInviteLinkHandler,
   revokeInviteLinkHandler,
+  updateGroupPictureHandler,
+  removeGroupPictureHandler,
+  updateGroupEphemeralHandler,
+  updateGroupAddModeHandler,
+  updateGroupJoinApprovalHandler,
+  listGroupRequestsHandler,
+  handleGroupRequestHandler,
 } from '../controllers/groupController';
 import {
   reactHandler,
@@ -44,7 +52,25 @@ import {
   checkNumberHandler,
   acceptInviteHandler,
   getInviteInfoHandler,
+  downloadMediaHandler,
+  forwardHandler,
+  editMessageHandler,
+  pinMessageHandler,
+  starMessageHandler,
+  updateDisappearingHandler,
+  chatModifyHandler,
 } from '../controllers/messageController';
+import {
+  updateProfileNameHandler,
+  updateProfileStatusHandler,
+  updateProfilePictureHandler,
+  removeProfilePictureHandler,
+  getProfilePictureHandler,
+  blockContactHandler,
+  unblockContactHandler,
+  sendStatusHandler,
+  sendStatusMediaHandler,
+} from '../controllers/profileController';
 import {
   listWebhookEndpointsHandler,
   createWebhookEndpointHandler,
@@ -69,6 +95,7 @@ import {
   GroupSchemas,
   WebhookSchemas,
   MessageSchemas,
+  ProfileSchemas,
 } from '../config/routeSchemas';
 
 /**
@@ -96,6 +123,9 @@ export async function sessionRoutes(
 
   // Get QR code
   fastify.get('/session/:sessionId/qr', { schema: SessionSchemas.qr }, getQrCodeHandler);
+
+  // Session events stream (SSE)
+  fastify.get('/session/:sessionId/events', { schema: SessionSchemas.events }, sessionEventsHandler);
 
   // Delete session
   fastify.delete('/session/:sessionId', { schema: SessionSchemas.delete }, deleteSessionHandler);
@@ -210,6 +240,83 @@ export async function sessionRoutes(
 
   // Get invite info
   fastify.post('/session/:sessionId/invite-info', { schema: MessageSchemas.inviteInfo }, getInviteInfoHandler);
+
+  // ========================================
+  // ADVANCED MESSAGE FEATURES
+  // ========================================
+
+  // Download media from message
+  fastify.post('/session/:sessionId/media/download', { schema: MessageSchemas.downloadMedia }, downloadMediaHandler);
+
+  // Forward message
+  fastify.post('/session/:sessionId/forward', { schema: MessageSchemas.forward }, forwardHandler);
+
+  // Edit message
+  fastify.put('/session/:sessionId/message', { schema: MessageSchemas.editMessage }, editMessageHandler);
+
+  // Pin/unpin chat
+  fastify.post('/session/:sessionId/message/pin', { schema: MessageSchemas.pinMessage }, pinMessageHandler);
+
+  // Star/unstar message
+  fastify.post('/session/:sessionId/message/star', { schema: MessageSchemas.starMessage }, starMessageHandler);
+
+  // Disappearing messages
+  fastify.put('/session/:sessionId/chat/:jid/disappearing', { schema: MessageSchemas.disappearing }, updateDisappearingHandler);
+
+  // Chat operations (archive, mute, clear, delete, markRead)
+  fastify.put('/session/:sessionId/chat/:jid/modify', { schema: MessageSchemas.chatModify }, chatModifyHandler);
+
+  // ========================================
+  // GROUP ADVANCED FEATURES
+  // ========================================
+
+  // Group picture
+  fastify.put('/session/:sessionId/groups/:groupId/picture', { schema: GroupSchemas.updatePicture }, updateGroupPictureHandler);
+  fastify.delete('/session/:sessionId/groups/:groupId/picture', { schema: GroupSchemas.removePicture }, removeGroupPictureHandler);
+
+  // Group ephemeral
+  fastify.put('/session/:sessionId/groups/:groupId/ephemeral', { schema: GroupSchemas.ephemeral }, updateGroupEphemeralHandler);
+
+  // Group add mode
+  fastify.put('/session/:sessionId/groups/:groupId/add-mode', { schema: GroupSchemas.addMode }, updateGroupAddModeHandler);
+
+  // Group join approval
+  fastify.put('/session/:sessionId/groups/:groupId/join-approval', { schema: GroupSchemas.joinApproval }, updateGroupJoinApprovalHandler);
+
+  // Group join requests
+  fastify.get('/session/:sessionId/groups/:groupId/requests', { schema: GroupSchemas.listRequests }, listGroupRequestsHandler);
+  fastify.post('/session/:sessionId/groups/:groupId/requests', { schema: GroupSchemas.handleRequest }, handleGroupRequestHandler);
+
+  // ========================================
+  // PROFILE MANAGEMENT
+  // ========================================
+
+  // Update profile name
+  fastify.put('/session/:sessionId/profile/name', { schema: ProfileSchemas.updateName }, updateProfileNameHandler);
+
+  // Update profile status
+  fastify.put('/session/:sessionId/profile/status', { schema: ProfileSchemas.updateStatus }, updateProfileStatusHandler);
+
+  // Update profile picture
+  fastify.put('/session/:sessionId/profile/picture', { schema: ProfileSchemas.updatePicture }, updateProfilePictureHandler);
+
+  // Remove profile picture
+  fastify.delete('/session/:sessionId/profile/picture', { schema: ProfileSchemas.removePicture }, removeProfilePictureHandler);
+
+  // Get profile picture URL
+  fastify.get('/session/:sessionId/profile-picture/:jid', { schema: ProfileSchemas.getPicture }, getProfilePictureHandler);
+
+  // Block contact
+  fastify.post('/session/:sessionId/block', { schema: ProfileSchemas.block }, blockContactHandler);
+
+  // Unblock contact
+  fastify.post('/session/:sessionId/unblock', { schema: ProfileSchemas.unblock }, unblockContactHandler);
+
+  // Send status/story (text)
+  fastify.post('/session/:sessionId/status', { schema: ProfileSchemas.sendStatus }, sendStatusHandler);
+
+  // Send status/story (media)
+  fastify.post('/session/:sessionId/status/media', { schema: ProfileSchemas.sendStatusMedia }, sendStatusMediaHandler);
 
   // ========================================
   // WEBHOOK MANAGEMENT

@@ -23,6 +23,8 @@ import QRCode from 'qrcode';
 import pino from 'pino';
 import { sessionStore } from './sessionStore';
 import { deliverWebhook, startRetryProcessor, stopRetryProcessor } from './webhookService';
+import { storeMessage } from './messageStore';
+import { EventEmitter } from 'events';
 
 // Logger for Baileys (set to silent in production)
 const logger = pino({ level: env.isDev ? 'debug' : 'silent' });
@@ -47,6 +49,13 @@ export const qrCodes = new Map<string, string>();
  * Value: retry count
  */
 const retryCounters = new Map<string, number>();
+
+/**
+ * Session events emitter for real-time SSE updates
+ * Events: qr:ready, qr:cleared, connected, disconnected, status
+ */
+export const sessionEvents = new EventEmitter();
+sessionEvents.setMaxListeners(50);
 
 /**
  * Helper: Get message type from Message object
@@ -244,6 +253,11 @@ export async function createSession(
     // Handle incoming messages
     socket.ev.on('messages.upsert', async (m) => {
       try {
+        // Store messages in memory for later lookup (forward, edit, download)
+        for (const msg of m.messages) {
+          storeMessage(sessionId, msg);
+        }
+
         // Format messages for webhook
         const messages = m.messages.map((msg) => ({
           id: msg.key.id,
@@ -440,6 +454,7 @@ async function handleConnectionUpdate(
       const qrDataUrl = await QRCode.toDataURL(qr);
       qrCodes.set(sessionId, qrDataUrl);
       await session.updateStatus(SessionStatus.QR_READY);
+      sessionEvents.emit('qr:ready', sessionId, qrDataUrl);
       console.log(`[WA] QR code ready for session: ${sessionId}`);
     } catch (error) {
       console.error(`[WA] Error generating QR:`, error);
@@ -455,6 +470,8 @@ async function handleConnectionUpdate(
 
     // Remove QR code
     qrCodes.delete(sessionId);
+    sessionEvents.emit('qr:cleared', sessionId);
+    sessionEvents.emit('disconnected', sessionId, { reason: statusCode, reconnecting: shouldReconnect });
 
     if (shouldReconnect) {
       // Check retry limit
@@ -509,6 +526,7 @@ async function handleConnectionUpdate(
   if (connection === 'open') {
     console.log(`[WA] Session ${sessionId} connected!`);
     qrCodes.delete(sessionId);
+    sessionEvents.emit('qr:cleared', sessionId);
     retryCounters.set(sessionId, 0);
     
     const socket = sessions.get(sessionId);
@@ -518,6 +536,7 @@ async function handleConnectionUpdate(
     }
     
     await session.updateStatus(SessionStatus.CONNECTED);
+    sessionEvents.emit('connected', sessionId, { phone_number: session.phone_number, name: session.name });
     await saveCreds();
   }
 }
