@@ -109,7 +109,6 @@ async function registerPlugins(): Promise<void> {
   // API info route
   app.get('/', {
     schema: {
-      hide: true,
       tags: ['Health'],
       summary: 'API Info',
       description: 'Returns API information and documentation links',
@@ -140,7 +139,6 @@ async function registerPlugins(): Promise<void> {
       tags: ['Health'],
       summary: 'OpenAPI 3.0 Specification',
       description: 'Returns the complete OpenAPI 3.0.3 specification in JSON format',
-      hide: true,
     },
   }, async (_, reply) => {
     try {
